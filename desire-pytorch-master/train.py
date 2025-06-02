@@ -60,15 +60,11 @@ def train(dataset_name,
     logger.info("Initializing train dataset")
     logger.info(train_path)
     train_dset, train_loader = data_loader(train_path, batch_size=batch_size, delim = ",")
-    # logger.info("Initializing val dataset")
-    # _, val_loader = data_loader(val_path)
     gpu_id = get_freer_gpu()
     device = torch.device(f"cuda:{gpu_id}" if gpu_id is not None and torch.cuda.is_available() else "cpu")
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  #
     logger.info("Device is %s", device)
 
-
-    iterations_per_epoch = len(train_dset) / batch_size
+    iterations_per_epoch = len(train_dset) // batch_size
     if num_epochs:
         num_iterations = int(iterations_per_epoch * num_epochs)
 
@@ -85,7 +81,6 @@ def train(dataset_name,
     scene.unsqueeze_(0)
     scene = scene.to(device)
 
-
     optimizer = optim.Adam(desire.parameters(),lr=lr)
 
     # Maybe restore from checkpoint
@@ -93,14 +88,9 @@ def train(dataset_name,
         restore_dict = torch.load(restore_path)
         desire.load_state_dict(restore_dict)
 
-    curr_epoch = 0
-    t = 0
-    print("Num iterations", num_iterations)
     scene = scene.to(device)
     for epoch in range(num_epochs):
-
         for batch_idx, batch in enumerate(train_loader):
-            if batch_idx > 5: break
             #logging.info("epoch {} :batch_idx {}, ".format(epoch, batch_idx))
             optimizer.zero_grad()
 
@@ -115,26 +105,17 @@ def train(dataset_name,
 
             x_start = obs_traj[:, :, 0].to(device)
 
-
-            # print("asd1",
-            #       obs_traj_rel.size(),
-            #       pred_traj_gt_rel.size())
-
             y_pred_traj, pred_delta, mean, log_var = desire(obs_traj_rel,
                                                             pred_traj_gt_rel,
                                                             x_start,
                                                             scene,
                                                             seq_start_end)
-            # print("asd",
-            #       y_pred_traj.size(),
-            #       pred_delta.size(),
-            #       pred_traj_gt_rel.size())
+
             tloss, (l2l,kld, cel,rl) = total_loss(y_pred_traj,
                                                   pred_delta,
                                                   pred_traj_gt_rel,
                                                   mean,
                                                   log_var)
-
 
             num_batches = seq_start_end.size(0)
             final_loss = torch.zeros(num_batches)
@@ -156,15 +137,11 @@ def train(dataset_name,
 
             torch.nn.utils.clip_grad_norm_(desire.parameters(), norm_clip_value)
             optimizer.step()
-            if t % 10 == 0:
-                t = 0
-                logging.info("Total loss {}; epoch = {}".format(str(final_loss.item()), epoch))
-                logging.info("L2L {}; RL {}; CEL {}; KLD {}; epoch = {}".format(l2l.item(),
-                                                                                rl.item(),
-                                                                                cel.item(),
-                                                                                kld.item(),
-                                                                                epoch))
-                t +=1
+            if batch_idx % 10 == 0:
+                logging.info("Total loss {}; epoch = {}; batch_idx = {}".format(
+                    str(final_loss.item()), epoch, batch_idx))
+                logging.info("L2L {}; RL {}; CEL {}; KLD {};".format(
+                    l2l.item(), rl.item(), cel.item(), kld.item()))
         weight_save_path = "weights/iter_{}.pth".format(str(epoch).zfill(3))
         logging.info("Saving weights for epoch {} in {}".format(epoch, weight_save_path))
         torch.save(desire.state_dict(), weight_save_path)
@@ -174,4 +151,4 @@ if __name__ == "__main__":
     print(os.getcwd())
     dataset_name = os.path.abspath("./dataset/denmark/")
     path_of_static_image = os.path.abspath("./bg.png")
-    train(dataset_name, path_of_static_image, batch_size=64, num_epochs=700)
+    train(dataset_name, path_of_static_image, batch_size=128, num_epochs=40, lr = 1e-4)
