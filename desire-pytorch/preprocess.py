@@ -32,12 +32,16 @@ def transform(path):
         .dt.total_seconds() / 600
     ).astype(int) + 1
 
-    df.loc[:, "lat"] = df["lat"] * 200 - 100
-    df.loc[:, "lat"] = df["lat"].astype(int)
-    df.loc[:, "long"] = df["long"] * 200 - 100
-    df.loc[:, "long"] = df["long"].astype(int)
-    df = df[["time", "traj_id", "lat", "long"]].sort_values(["time", "traj_id"])
-    df.to_csv("./dataset/denmark/test/test.csv", index=False, header=False)
+    df = df[(df["lat"] <= 0.25) & (df["long"] >= 0.75)]
+    
+    traj_counts = df['traj_id'].value_counts()
+    valid_traj_ids = traj_counts[traj_counts >= 30].index
+    df = df[df['traj_id'].isin(valid_traj_ids)].reset_index(drop=True)
 
-path = "./dataset/denmark/raw/test.pkl"
+    df.loc[:, "lat"] = df["lat"] * 40
+    df.loc[:, "long"] = (df["long"] - 0.75) * 40
+    df = df[["time", "traj_id", "lat", "long"]].sort_values(["time", "traj_id"])
+    df.to_csv("./dataset/denmark/train/train.csv", index=False, header=False)
+
+path = "./dataset/denmark/raw/train.pkl"
 transform(path)

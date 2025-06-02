@@ -58,7 +58,12 @@ def train(dataset_name,
 
     logger.info("Initializing train dataset")
     logger.info(train_path)
-    train_dset, train_loader = data_loader(train_path, batch_size=batch_size, delim = ",")
+    train_dset, train_loader = data_loader(
+        train_path, 
+        batch_size=batch_size, 
+        delim = ",", 
+        loader_num_workers=2
+    )
     gpu_id = get_freer_gpu()
     device = torch.device(f"cuda:{gpu_id}" if gpu_id is not None and torch.cuda.is_available() else "cpu")
     logger.info("Device is %s", device)
@@ -122,9 +127,9 @@ def train(dataset_name,
             scaler.step(optimizer)
             scaler.update()
 
-            if batch_idx % 10 == 0:
+            if batch_idx % 1 == 0:
                 logging.info("Total loss {}; epoch = {}; batch_idx = {}".format(
-                    str(tloss.item()), epoch, batch_idx))
+                    str(tloss.mean().item()), epoch, batch_idx))
                 logging.info("L2L {}; RL {}; CEL {}; KLD {};".format(
                     l2l.item(), rl.item(), cel.item(), kld.item()))
         weight_save_path = "weights/iter_{}.pth".format(str(epoch).zfill(3))
@@ -137,4 +142,4 @@ if __name__ == "__main__":
     mp.set_start_method('spawn', force=True)
     dataset_name = os.path.abspath("./dataset/denmark/")
     path_of_static_image = os.path.abspath("./bg.png")
-    train(dataset_name, path_of_static_image, batch_size=256, num_epochs=40, lr = 1e-4)
+    train(dataset_name, path_of_static_image, batch_size=512, num_epochs=50, lr = 2e-4)
