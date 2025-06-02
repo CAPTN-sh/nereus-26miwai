@@ -16,6 +16,8 @@ from desire.models import DESIRE
 from desire.utils.params import IOCParams, SGMParams
 from desire.nn.loss import *
 from PIL import Image
+import subprocess
+import re
 
 
 from PIL import Image
@@ -28,9 +30,20 @@ logging.basicConfig(level=logging.INFO, format=FORMAT, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 def get_freer_gpu():
-    os.system('nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >tmp')
-    memory_available = [int(x.split()[2]) for x in open('tmp', 'r').readlines()]
-    return np.argmax(memory_available)
+    try:
+        result = subprocess.check_output(['nvidia-smi'], encoding='utf-8')
+        # Find all memory usage lines using regex
+        matches = re.findall(r'(\d+)MiB / +(\d+)MiB', result)
+        free_memory = [int(total) - int(used) for used, total in matches]
+
+        if not free_memory:
+            raise ValueError("Could not parse GPU memory from nvidia-smi")
+
+        return int(np.argmax(free_memory))
+
+    except Exception as e:
+        print(f"[WARN] Could not detect GPU memory: {e}")
+        return None
 
 
 def train(dataset_name,
@@ -49,9 +62,8 @@ def train(dataset_name,
     train_dset, train_loader = data_loader(train_path, batch_size=batch_size, delim = ",")
     # logger.info("Initializing val dataset")
     # _, val_loader = data_loader(val_path)
-
-
-    device = torch.device("cuda:{}".format(get_freer_gpu()) if torch.cuda.is_available() else "cpu")
+    gpu_id = get_freer_gpu()
+    device = torch.device(f"cuda:{gpu_id}" if gpu_id is not None and torch.cuda.is_available() else "cpu")
     # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  #
     logger.info("Device is %s", device)
 
@@ -152,8 +164,7 @@ def train(dataset_name,
                                                                                 cel.item(),
                                                                                 kld.item(),
                                                                                 epoch))
-            t +=1
-
+                t +=1
         weight_save_path = "weights/iter_{}.pth".format(str(epoch).zfill(3))
         logging.info("Saving weights for epoch {} in {}".format(epoch, weight_save_path))
         torch.save(desire.state_dict(), weight_save_path)
@@ -163,4 +174,4 @@ if __name__ == "__main__":
     print(os.getcwd())
     dataset_name = os.path.abspath("./dataset/denmark/")
     path_of_static_image = os.path.abspath("./bg.png")
-    train(dataset_name, path_of_static_image, batch_size=4, num_epochs=10)
+    train(dataset_name, path_of_static_image, batch_size=64, num_epochs=700)
