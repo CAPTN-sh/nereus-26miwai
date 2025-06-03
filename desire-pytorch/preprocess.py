@@ -38,8 +38,8 @@ def transform(path):
     valid_traj_ids = traj_counts[traj_counts >= 30].index
     df = df[df['traj_id'].isin(valid_traj_ids)].reset_index(drop=True)
 
-    df.loc[:, "lat"] = df["lat"] * 40
-    df.loc[:, "long"] = (df["long"] - 0.75) * 40
+    df.loc[:, "lat"] = df["lat"] * 4 * 500
+    df.loc[:, "long"] = (df["long"] - 0.75) * 4 * 500
     df = df[["time", "traj_id", "lat", "long"]].sort_values(["time", "traj_id"])
     df.to_csv("./dataset/denmark/train/train.csv", index=False, header=False)
 

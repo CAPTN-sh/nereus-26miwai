@@ -97,7 +97,7 @@ def train(dataset_name,
 
     for epoch in range(num_epochs):
         for batch_idx, batch in enumerate(train_loader):
-            logging.info("epoch {} :batch_idx {}, ".format(epoch, batch_idx))
+            #logging.info("epoch {} :batch_idx {}, ".format(epoch, batch_idx))
             optimizer.zero_grad()
             
             batch = [tensor.to(device) for tensor in batch]
@@ -122,16 +122,23 @@ def train(dataset_name,
                                                     pred_traj_gt_rel,
                                                     mean,
                                                     log_var)
-            scaler.scale(tloss.sum()).backward()
+            num_batches = seq_start_end.size(0)
+            final_loss = torch.zeros(num_batches)
+            for i, (s, e) in enumerate(seq_start_end[0:-2]):
+                s = s.item()
+                e = e.item()
+                l = tloss[s:e].sum()
+                final_loss[i] = l
+            final_loss = final_loss.sum()
+            final_loss.backward()
             torch.nn.utils.clip_grad_norm_(desire.parameters(), norm_clip_value)
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.step()
 
-            if batch_idx % 1 == 0:
-                logging.info("Total loss {}; epoch = {}; batch_idx = {}".format(
-                    str(tloss.mean().item()), epoch, batch_idx))
-                logging.info("L2L {}; RL {}; CEL {}; KLD {};".format(
-                    l2l.item(), rl.item(), cel.item(), kld.item()))
+        logging.info("Total loss {}; epoch = {}; batch_idx = {}".format(
+            str(tloss.mean().item()), epoch, batch_idx))
+        logging.info("L2L {}; RL {}; CEL {}; KLD {};".format(
+            l2l.item(), rl.item(), cel.item(), kld.item()))
+        
         weight_save_path = "weights/iter_{}.pth".format(str(epoch).zfill(3))
         logging.info("Saving weights for epoch {} in {}".format(epoch, weight_save_path))
         torch.save(desire.state_dict(), weight_save_path)
@@ -142,4 +149,4 @@ if __name__ == "__main__":
     mp.set_start_method('spawn', force=True)
     dataset_name = os.path.abspath("./dataset/denmark/")
     path_of_static_image = os.path.abspath("./bg.png")
-    train(dataset_name, path_of_static_image, batch_size=512, num_epochs=50, lr = 2e-4)
+    train(dataset_name, path_of_static_image, batch_size=256, num_epochs=200, lr = 1e-4)
