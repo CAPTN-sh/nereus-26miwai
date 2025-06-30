@@ -1,0 +1,16 @@
+in_folder: "C:/Users/Ben/shipwise/data_base/AIS/kiel/2_decoded"
+out_file: "C:/Users/Ben/shipwise/data_base/AIS/kiel/3_features/traj.parquet"
+
+pipeline:
+  - function: preprocessing.feature_extraction.preprocessor.filter_lat_lon
+  - function: preprocessing.feature_extraction.preprocessor.drop_duplicates
+  - function: preprocessing.feature_extraction.preprocessor.compute_speed
+  - function: preprocessing.feature_extraction.preprocessor.drop_outlier
+    args:
+      col: "sog"
+      max_threshold: 30
+  - function: preprocessing.feature_extraction.preprocessor.calculate_rot
+  - function: preprocessing.feature_extraction.preprocessor.drop_outlier
+    args:
+      col: "rot"
+      max_threshold: 200

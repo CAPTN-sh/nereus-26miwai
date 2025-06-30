@@ -1,0 +1,35 @@
+# for pandas to handle NaNs use the following types: 
+# Int64, Float64, boolean, string, category, datetime
+
+in_folder: "C:/Users/Ben/shipwise/data_base/AIS/kiel/1_raw"
+out_folder: "C:/Users/Ben/shipwise/data_base/AIS/kiel/2_decoded"
+
+tables:
+    traj:
+        key_columns: ["mmsi", "timestamp", "lon", "lat"]
+        column_types:
+            mmsi: Int64
+            timestamp: datetime
+            lon: Float64
+            lat: Float64
+            speed: Float64
+            course: Float64
+            heading: Int64
+            status: Int64
+            turn: Int64
+            accuracy: boolean
+            raim: boolean
+            maneuver: Int64
+
+    ship:
+        key_columns: ["mmsi", "timestamp", "ship_type"]
+        column_types:
+            mmsi: Int64
+            timestamp: datetime
+            ship_type: Int64
+            to_bow: Int64
+            to_stern: Int64
+            to_port: Int64
+            to_starboard: Int64
+            draught: Int64
+            destination: string
