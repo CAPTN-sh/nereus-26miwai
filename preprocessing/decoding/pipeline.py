@@ -1,17 +1,17 @@
-from preprocessing.decoding.decoder import Decoder
 from pathlib import Path
-import yaml
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from collections import defaultdict
 
+from preprocessing.decoding.decoder import Decoder
+from preprocessing.utils.config import load_config
+
 
 class DecodingPipeline:
 
     def __init__(self, config_path):
-        with open(config_path, "r") as f:
-            self.config = yaml.safe_load(f)
+        self.config = load_config(config_path)
 
     def run(self):
         groups = self.group_files_by_date()
@@ -31,7 +31,7 @@ class DecodingPipeline:
 
     def group_files_by_date(self):
         groups = defaultdict(list)
-        for file in Path(self.config["in_folder"]).glob("*.nmea.txt"):
+        for file in Path(self.config["paths"]["in_folder"]).glob("*.nmea.txt"):
             date_str = file.name[:8]
             groups[date_str].append(file)
         return groups

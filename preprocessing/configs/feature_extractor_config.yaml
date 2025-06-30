@@ -1,0 +1,19 @@
+paths:
+  in_folder: "data_base/AIS/kiel/2_decoded"
+  out_file: "data_base/AIS/kiel/3_features/traj.parquet"
+
+pipelines:
+  mmsi:
+    # ship features
+    - function: preprocessing.feature_extraction.preprocessor.filter_lat_lon
+    - function: preprocessing.feature_extraction.preprocessor.drop_duplicates
+    - function: preprocessing.feature_extraction.preprocessor.compute_speed
+    - function: preprocessing.feature_extraction.preprocessor.drop_outlier
+      args: {col: "sog", max_threshold: 30}
+    - function: preprocessing.feature_extraction.preprocessor.calculate_rot
+    - function: preprocessing.feature_extraction.preprocessor.drop_outlier
+      args: {col: "rot", max_threshold: 200}
+    # ship2land features
+
+#  timestamp:
+    # ship2ship features

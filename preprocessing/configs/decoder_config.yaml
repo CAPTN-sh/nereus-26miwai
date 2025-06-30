@@ -1,8 +1,9 @@
 # for pandas to handle NaNs use the following types: 
 # Int64, Float64, boolean, string, category, datetime
 
-in_folder: "C:/Users/Ben/shipwise/data_base/AIS/kiel/1_raw"
-out_folder: "C:/Users/Ben/shipwise/data_base/AIS/kiel/2_decoded"
+paths:
+    in_folder: "data_base/AIS/kiel/1_raw"
+    out_folder: "data_base/AIS/kiel/2_decoded"
 
 tables:
     traj:

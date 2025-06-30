@@ -1,7 +1,8 @@
 import pandas as pd
+import numpy as np
+
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor
-import numpy as np
 from scipy.interpolate import CubicSpline
 
 

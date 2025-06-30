@@ -1,0 +1,3 @@
+paths:
+  decoder_config: "preprocessing/configs/decoder_config.yaml"
+  feature_extractor_config: "preprocessing/configs/feature_extractor_config.yaml"

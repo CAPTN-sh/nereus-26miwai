@@ -1,7 +1,8 @@
+import pandas as pd
+
 from pathlib import Path
 from pyais import decode
 from collections import defaultdict
-import pandas as pd
 from typing import List
 
 
@@ -87,5 +88,8 @@ class Decoder:
                     df[c_name] = pd.to_datetime(df[c_name], errors="coerce")
                 elif c_type:
                     df[c_name] = df[c_name].astype(c_type, errors="ignore")
-            out_path = Path(self.config["out_folder"]) / f"{date}_{name}.parquet"
-            df.to_parquet(out_path, index=False, engine="pyarrow")
+            df.to_parquet(
+                Path(self.config["paths"]["out_folder"]) / f"{date}_{name}.parquet",
+                index=False,
+                engine="pyarrow",
+            )
