@@ -1,0 +1,124 @@
+paths:
+  in_folder: "data/kiel/ais/2_decoded"
+  out_folder: "data/kiel/ais/3_features"
+
+pipeline_steps:
+  [
+    "filter",
+    "smooth_and_split",
+    "drop_outlier", 
+    "interpolate", 
+    "calc_features",
+    "anchored_default"
+  ]
+
+filter:
+  - function: preprocessing.steps.transform.nodes.geo_features.filter_by_map
+    args: 
+      map_path: "kiel_fjord_epsg4326.geojson"
+      map_name: "kiel fjord water area"
+
+  - function: preprocessing.steps.transform.nodes.geo_features.filter_by_map
+    args: 
+      map_path: "kiel_marinas.geojson"
+      map_name: "marinas total"
+
+  - method: add_speed
+    args: 
+      overwrite: False
+      name: "calc_speed"
+      units: ["nm", "h"]
+
+# TODO seems arbitrary
+  - function: preprocessing.steps.transform.nodes.wrapper.outlier
+    args: 
+      column: "calc_speed"
+      measures: []
+      threshold: 100
+      drop: True
+
+smooth_and_split:
+  - function: preprocessing.steps.transform.nodes.wrapper.smooth
+    args:
+      cls: movingpandas.trajectory_smoother.KalmanSmootherCV
+
+  - function: preprocessing.steps.transform.nodes.wrapper.split
+    args:
+      cls: movingpandas.ObservationGapSplitter
+      gap: timedelta_in_min_10
+
+  - function: preprocessing.steps.transform.nodes.wrapper.split
+    args:
+      cls: movingpandas.SpeedSplitter
+      speed: 0.1
+      duration: timedelta_in_min_10
+
+  - function: preprocessing.steps.transform.nodes.wrapper.split
+    args:
+      cls: movingpandas.StopSplitter
+      max_diameter: 50
+      min_duration: timedelta_in_min_10
+
+drop_outlier:
+  - method: add_distance
+    args: 
+      overwrite: True
+      units: ["nm"]
+
+  - function: preprocessing.steps.transform.nodes.wrapper.outlier
+    args: 
+      column: "distance"
+      measures: [scipy.stats.zscore, abs]
+      threshold: 3
+      drop: True
+
+interpolate:
+  - function: preprocessing.steps.transform.nodes.interpolate.interpolate
+    args: 
+      interp_cols: ["lat", "lon"]
+      ff_cols: ["speed", "turn", "course", "heading", "status", "maneuver", "accuracy", "raim"]
+
+calc_features:
+  - method: add_speed
+    args: 
+      overwrite: True
+      name: "calc_speed"
+      units: ["nm", "h"]
+
+  - method: add_direction
+    args: 
+      overwrite: True
+      name: "direction"
+
+  - method: add_angular_difference
+    args: 
+      overwrite: True
+      name: "angular_difference"
+
+  - method: add_acceleration
+    args: 
+      overwrite: True
+      name: "calc_acc"
+      units: ["nm", "h", "h"]
+
+  - function: preprocessing.steps.transform.nodes.geo_features.add_within
+    args: 
+      map_path: "kiel_buoys.geojson"
+      map_name: "waterways total"
+      col_name: "in_waterways"
+
+  - function: preprocessing.steps.transform.nodes.geo_features.add_min_distance
+    args: 
+      map_path: "kiel_fjord_epsg4326.geojson"
+      map_name: "kiel fjord coastline"
+      col_name: "distance_shore"
+
+anchored_default:
+  - function: preprocessing.steps.transform.nodes.wrapper.anchored_default
+    args:
+      max_speed: 0.1
+      default_values:
+        calc_speed: 0
+        direction: 0
+        angular_difference: 0
+        calc_acc: 0

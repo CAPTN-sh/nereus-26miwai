@@ -1,0 +1,44 @@
+paths:
+  in_folder: "data/kiel/ais/3_features"
+  out_folder: "data/kiel/ais/3_features"
+
+max_edge_dist: 1000 # in meters
+
+pipeline_steps:
+  [
+    "add_feature"
+  ]
+
+add_feature:
+  - metric: preprocessing.steps.transform.edges.metrics.get_abs_bearing
+    args:
+      col_name: "abs_bearing"
+      arg_cols: ["lat", "lon"]
+      
+  - metric: preprocessing.steps.transform.edges.metrics.get_rel_bearing
+    args:
+      col_name: "rel_bearing"
+      arg_cols: ["lat", "lon", "direction"]
+
+  - metric: preprocessing.steps.transform.edges.metrics.get_rel_speed
+    args:
+      col_name: "rel_speed"
+      arg_cols: ["calc_speed", "direction"]
+
+# add_bearings
+# get_abs_bearings
+# get_rel_bearings
+# relative_speed
+# get_geo_distance  distance_unit="nm" 
+
+# TODO CPA and VCD
+# itterative_cpa
+    # interaction
+    # crash position
+# low speed add_direction (COG) is all over the place (interpolate AIS msg?)
+# anchored_default? birthdetection
+# location identification qualifier -> U
+# destination - strange strings but important?!
+
+# speed filter seems arbitrary
+# interpolation what to use?
