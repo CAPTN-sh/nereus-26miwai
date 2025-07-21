@@ -1,6 +1,6 @@
 {
   "MD004": false, // allow inconsistent heading style
-  "MD007": { "indent": 2 }, // customize list indent
+  "MD007": { "indent": 4 }, // customize list indent
   "MD013": false, // ignore line length
   "MD025": false, // allow multiple top-level headings
   "MD012": false, // allow multiple consecutive blank lines
