@@ -1,0 +1,29 @@
+name: situational-awareness
+
+channels:
+    - pytorch
+    - nvidia
+    - conda-forge
+    - nodefaults
+
+dependencies:
+    - python>=3.12, <3.13
+    - pip
+    - conda-lock
+    - nodejs
+
+    # Maps
+    - geoviews
+
+    # Similarity measures
+    - dtaidistance
+
+    # Plotting
+    - selenium
+    - firefox
+    - geckodriver
+
+
+    - pip:
+        - poetry
+        - keyring
