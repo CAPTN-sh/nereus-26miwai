@@ -3,16 +3,9 @@ from preprocessing.steps.transform.nodes.pipeline import NodesPipeline
 from preprocessing.steps.transform.edges.pipeline import EdgesPipeline
 from preprocessing.utils.pipeline.pipeline_executor import PipelineExecutor
 from utils.config import Config
-import pandas as pd
-from pathlib import Path
 
 if __name__ == "__main__":
     Config("preprocessing/configs/_main.yaml")
     PipelineExecutor(DecodingPipeline()).run_parallel()
     PipelineExecutor(NodesPipeline()).run_parallel()
     PipelineExecutor(EdgesPipeline()).run_parallel()
-    path = (
-        Path(Config().get("transform_edges")["paths"]["out_folder"]) / "edges.parquet"
-    )
-    df = pd.read_parquet(path)
-    print(df)

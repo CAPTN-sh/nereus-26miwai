@@ -1,5 +1,14 @@
+import pandas as pd
 import geopandas as gpd
 from shapely import Point
+
+
+def fillna_with(df, value):
+    return pd.DataFrame.fillna(df, value)
+
+
+def fillna_with_zero(df):
+    return fillna_with(df, 0)
 
 
 def drop_duplicates(df):

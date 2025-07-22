@@ -30,18 +30,18 @@ class ShipInfo:
             json.dump(dict(self.db), f, indent=2)
 
     def get_info(self, mmsi):
-        if int(mmsi) in self.db:
-            return self.db[int(mmsi)]
+        if str(mmsi) in self.db:
+            return self.db[str(mmsi)]
 
         with self.lock:
-            if int(mmsi) in self.db:
-                return self.db[int(mmsi)]
+            if str(mmsi) in self.db:
+                return self.db[str(mmsi)]
 
             err, msg, info = crawl_ship_info(mmsi)
             if err:
                 return None
 
-            self.db[int(mmsi)] = self.transform_info(info)
+            self.db[str(mmsi)] = self.transform_info(info)
             self._save_to_file()
             return info
 

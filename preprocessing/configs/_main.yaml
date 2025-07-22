@@ -2,10 +2,7 @@ config:
   decode: "preprocessing/configs/decode.yaml"
   transform_nodes: "preprocessing/configs/transform_nodes.yaml"
   transform_edges: "preprocessing/configs/transform_edges.yaml"
-#  encode: "preprocessing/configs/encode.yaml"
-
+  
 folder:
   maps: "data/kiel/maps"
   ship_db: "data/kiel/ship_db"
-  raw: "data/kiel/ais/1_raw"
-  output: "data/kiel/ais"

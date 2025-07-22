@@ -5,21 +5,6 @@ import re
 from datetime import timedelta
 
 
-def outlier(trajectories: Iterable[Trajectory], column, measures, threshold, drop=True):
-    for traj in trajectories:
-        values = traj.df[column].copy()
-
-        for measure in measures:
-            values = import_from_string(measure)(values)
-        outliers = values > threshold
-
-        if drop:
-            traj.df = traj.df.loc[~outliers].copy()
-        else:
-            traj.df[f"{column}_outlier"] = outliers
-    return trajectories
-
-
 def split(trajectories: Iterable[Trajectory], cls, **args):
     splitter = import_from_string(cls)(trajectories)
 
@@ -37,14 +22,4 @@ def split(trajectories: Iterable[Trajectory], cls, **args):
 def smooth(trajectories: Iterable[Trajectory], cls, **args):
     smoother = import_from_string(cls)(trajectories)
     trajectories = smoother.smooth(**args)
-    return trajectories
-
-
-def anchored_default(trajectories: Iterable[Trajectory], max_speed, default_values):
-    for traj in trajectories:
-        anchored = traj.df[traj.speed_col_name].max() <= max_speed
-        if anchored:
-            for col, val in default_values.items():
-                traj.df[col] = val
-        traj.df["anchored"] = anchored
     return trajectories

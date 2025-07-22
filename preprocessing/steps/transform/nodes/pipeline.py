@@ -2,7 +2,6 @@ from pathlib import Path
 import pandas as pd
 from multiprocessing import Manager, Lock
 from concurrent.futures import ProcessPoolExecutor
-
 from utils.config import Config
 from preprocessing.steps.transform.nodes.trajectory import TrajectoryProcessor
 from preprocessing.utils.ship_info_system.ship_info import ShipInfo
