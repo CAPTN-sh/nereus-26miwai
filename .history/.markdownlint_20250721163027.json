@@ -1,0 +1,12 @@
+{
+  "MD013": false, // ignore line length
+  "MD025": false, // allow multiple top-level headings
+  "MD007": { "indent": 4 } // customize list indent
+  MD012: false,MD025,MD022,MD032,MD047,
+}
+
+
+
+
+
+

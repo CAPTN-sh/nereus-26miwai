@@ -1,0 +1,26 @@
+# .flake8
+
+[flake8]
+max-line-length = 420
+extend-ignore = E203
+ignore = MD025,MD022,MD032,E129,E221,E225,E265,E266,E226,E302,E303,E305,E402,E501,E701,F841,F401,W291,W293,W504
+    # W293: Warning - Blank line contains whitespaces
+    # E221: Mutliple Spaces before Operator
+    # E225: Missing white space before operator
+    # E265: Block comment should start with '# '
+    # E266: Missing space before arithmetic
+    # E402: Module level import not at top of file
+    # F841: Local variable is assigned to but never used
+    # F401: Module imported but unused
+    # E302: Expected 2 blank lines, found 0
+    # E305: Expected 2 blank lines after class or function definition, found 1
+    # E701: Multiple statements on one line (colon)
+    # E501: Line too long (82 > 79 characters)
+    # E303: Too many blank lines
+    # E129: visually indented line with same indent as next logical line
+    # W504: Line break occurred after a binary operator
+    # E266: Too many leading '#' for block comment
+    # MD025: Multiple top-level headings
+    # MD022: Headings should be surrounded by blank lines
+    # MD032: Lists should be surrounded by blank lines
+
