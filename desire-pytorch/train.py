@@ -25,15 +25,16 @@ from PIL import Image
 import torchvision.transforms.functional as TF
 from torch import amp
 
-FORMAT = '[%(levelname)s: %(filename)s: %(lineno)4d]: %(message)s'
+FORMAT = "[%(levelname)s: %(filename)s: %(lineno)4d]: %(message)s"
 logging.basicConfig(level=logging.INFO, format=FORMAT, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
+
 def get_freer_gpu():
     try:
-        result = subprocess.check_output(['nvidia-smi'], encoding='utf-8')
+        result = subprocess.check_output(["nvidia-smi"], encoding="utf-8")
         # Find all memory usage lines using regex
-        matches = re.findall(r'(\d+)MiB / +(\d+)MiB', result)
+        matches = re.findall(r"(\d+)MiB / +(\d+)MiB", result)
         free_memory = [int(total) - int(used) for used, total in matches]
 
         if not free_memory:
@@ -46,38 +47,36 @@ def get_freer_gpu():
         return None
 
 
-def train(dataset_name,
-          path_of_static_image,
-          restore_path=None,
-          batch_size=64,
-          num_epochs=700,
-          norm_clip_value=1.0,
-          lr = 5e-4):
+def train(
+    dataset_name,
+    path_of_static_image,
+    restore_path=None,
+    batch_size=64,
+    num_epochs=700,
+    norm_clip_value=1.0,
+    lr=5e-4,
+):
 
-    train_path = get_dset_path(dataset_name, 'train')
+    train_path = get_dset_path(dataset_name, "train")
 
     logger.info("Initializing train dataset")
     logger.info(train_path)
     train_dset, train_loader = data_loader(
-        train_path, 
-        batch_size=batch_size, 
-        delim = ",", 
-        loader_num_workers=2
+        train_path, batch_size=batch_size, delim=",", loader_num_workers=2
     )
     gpu_id = get_freer_gpu()
-    device = torch.device(f"cuda:{gpu_id}" if gpu_id is not None and torch.cuda.is_available() else "cpu")
+    device = torch.device(
+        f"cuda:{gpu_id}" if gpu_id is not None and torch.cuda.is_available() else "cpu"
+    )
     logger.info("Device is %s", device)
 
     iterations_per_epoch = len(train_dset) // batch_size
     if num_epochs:
         num_iterations = int(iterations_per_epoch * num_epochs)
 
-    logger.info(
-        'There are {} iterations per epoch'.format(iterations_per_epoch)
-    )
+    logger.info("There are {} iterations per epoch".format(iterations_per_epoch))
 
-    desire = DESIRE(IOCParams(),
-                    SGMParams())
+    desire = DESIRE(IOCParams(), SGMParams())
     desire = desire.to(device)
 
     image = Image.open(path_of_static_image)
@@ -85,7 +84,7 @@ def train(dataset_name,
     scene.unsqueeze_(0)
     scene = scene.to(device)
 
-    optimizer = optim.Adam(desire.parameters(),lr=lr)
+    optimizer = optim.Adam(desire.parameters(), lr=lr)
 
     # Maybe restore from checkpoint
     if restore_path is not None:
@@ -97,31 +96,35 @@ def train(dataset_name,
 
     for epoch in range(num_epochs):
         for batch_idx, batch in enumerate(train_loader):
-            #logging.info("epoch {} :batch_idx {}, ".format(epoch, batch_idx))
+            # logging.info("epoch {} :batch_idx {}, ".format(epoch, batch_idx))
             optimizer.zero_grad()
-            
+
             batch = [tensor.to(device) for tensor in batch]
-            (obs_traj, pred_traj_gt, obs_traj_rel, pred_traj_gt_rel, _, _, seq_start_end) = batch
+            (
+                obs_traj,
+                pred_traj_gt,
+                obs_traj_rel,
+                pred_traj_gt_rel,
+                _,
+                _,
+                seq_start_end,
+            ) = batch
 
-            obs_traj = obs_traj.permute(1,2,0)
-            pred_traj_gt = pred_traj_gt.permute(1,2,0)
+            obs_traj = obs_traj.permute(1, 2, 0)
+            pred_traj_gt = pred_traj_gt.permute(1, 2, 0)
 
-            obs_traj_rel = obs_traj_rel.permute(1,2,0)
-            pred_traj_gt_rel = pred_traj_gt_rel.permute(1,2,0)
+            obs_traj_rel = obs_traj_rel.permute(1, 2, 0)
+            pred_traj_gt_rel = pred_traj_gt_rel.permute(1, 2, 0)
 
             x_start = obs_traj[:, :, 0].to(device)
-            with amp.autocast(device_type='cuda'):
-                y_pred_traj, pred_delta, mean, log_var = desire(obs_traj_rel,
-                                                                pred_traj_gt_rel,
-                                                                x_start,
-                                                                scene,
-                                                                seq_start_end)
+            with amp.autocast(device_type="cuda"):
+                y_pred_traj, pred_delta, mean, log_var = desire(
+                    obs_traj_rel, pred_traj_gt_rel, x_start, scene, seq_start_end
+                )
 
-                tloss, (l2l,kld, cel,rl) = total_loss(y_pred_traj,
-                                                    pred_delta,
-                                                    pred_traj_gt_rel,
-                                                    mean,
-                                                    log_var)
+                tloss, (l2l, kld, cel, rl) = total_loss(
+                    y_pred_traj, pred_delta, pred_traj_gt_rel, mean, log_var
+                )
             num_batches = seq_start_end.size(0)
             final_loss = torch.zeros(num_batches)
             for i, (s, e) in enumerate(seq_start_end[0:-2]):
@@ -134,19 +137,30 @@ def train(dataset_name,
             torch.nn.utils.clip_grad_norm_(desire.parameters(), norm_clip_value)
             optimizer.step()
 
-        logging.info("Total loss {}; epoch = {}; batch_idx = {}".format(
-            str(tloss.mean().item()), epoch, batch_idx))
-        logging.info("L2L {}; RL {}; CEL {}; KLD {};".format(
-            l2l.item(), rl.item(), cel.item(), kld.item()))
-        
+        logging.info(
+            "Total loss {}; epoch = {}; batch_idx = {}".format(
+                str(tloss.mean().item()), epoch, batch_idx
+            )
+        )
+        logging.info(
+            "L2L {}; RL {}; CEL {}; KLD {};".format(
+                l2l.item(), rl.item(), cel.item(), kld.item()
+            )
+        )
+
         weight_save_path = "weights/iter_{}.pth".format(str(epoch).zfill(3))
-        logging.info("Saving weights for epoch {} in {}".format(epoch, weight_save_path))
+        logging.info(
+            "Saving weights for epoch {} in {}".format(epoch, weight_save_path)
+        )
         torch.save(desire.state_dict(), weight_save_path)
-        logging.info("Done saving weights for epoch {} in {}".format(epoch, weight_save_path))
+        logging.info(
+            "Done saving weights for epoch {} in {}".format(epoch, weight_save_path)
+        )
+
 
 if __name__ == "__main__":
     print(os.getcwd())
-    mp.set_start_method('spawn', force=True)
+    mp.set_start_method("spawn", force=True)
     dataset_name = os.path.abspath("./dataset/denmark/")
     path_of_static_image = os.path.abspath("./bg.png")
-    train(dataset_name, path_of_static_image, batch_size=256, num_epochs=200, lr = 1e-4)
+    train(dataset_name, path_of_static_image, batch_size=256, num_epochs=200, lr=1e-4)
