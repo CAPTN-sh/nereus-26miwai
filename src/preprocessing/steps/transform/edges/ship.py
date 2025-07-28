@@ -23,8 +23,7 @@ class ShipProcessor:
         )
 
         mmsis = gdf["mmsi"].to_numpy()
-        anchored = gdf["anchored"].to_numpy()
-        mask = (neighbors["i"] != neighbors["j"]) & ~anchored[neighbors["i"]]
+        mask = neighbors["i"] != neighbors["j"]
         num_edges = np.count_nonzero(mask)
 
         df_edges = pd.DataFrame(
@@ -33,7 +32,6 @@ class ShipProcessor:
                 "mmsi": mmsis[neighbors["i"]][mask],
                 "mmsi_other": mmsis[neighbors["j"]][mask],
                 "dist": neighbors["v"].round(2)[mask],
-                "anchored": anchored[neighbors["i"]][mask],
             }
         )
         return df_edges

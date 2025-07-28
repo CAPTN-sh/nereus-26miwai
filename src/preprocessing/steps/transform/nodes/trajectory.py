@@ -39,7 +39,7 @@ class TrajectoryProcessor:
         gdf = to_GeoDataFrame(drop_duplicates(traj_df))
         traj = []
         if len(gdf) > 1:
-            info = self.get_ship_info(mmsi, ship_df, ship_dict)
+            info = self.get_ship_info(mmsi, ship_df)  # , ship_dict)
             for col, value in info.items():
                 gdf[col] = value
             traj = [Trajectory(gdf, traj_id=0, obj_id=mmsi, t="timestamp")]
@@ -64,7 +64,23 @@ class TrajectoryProcessor:
         df = pd.concat(traj.df.reset_index() for traj in self.trajectories)
         return df
 
-    def get_ship_info(
+    def get_ship_info(self, mmsi: int, ship_df: DataFrame) -> dict[str, list]:
+        info = {
+            "mmsi": mmsi,
+            "ship_type": 0,
+            "to_bow": 0,
+            "to_stern": 0,
+            "to_port": 0,
+            "to_starboard": 0,
+        }
+        if ship_df is not None and not ship_df.empty:
+            for k in info.keys():
+                v = ship_df[k].max()
+                if pd.notna(v) and v > 0:
+                    info[k] = v
+        return info
+
+    def get_ship_info_web(
         self, mmsi: int, ship_df: DataFrame, ship_dict: ShipInfo
     ) -> dict[str, list]:
         """
@@ -123,7 +139,9 @@ class TrajectoryProcessor:
         """
         min_obs = self.config["global_args"]["min_obs"]
         valid_traj = [
-            traj for traj in self.trajectories.trajectories if len(traj.df) >= min_obs
+            traj
+            for traj in self.trajectories.trajectories
+            if len(traj.df) >= min_obs and not traj.df.dropna(how="all", axis=1).empty
         ]
         self.trajectories = TrajectoryCollection(
             valid_traj, traj_id_col="traj_id", obj_id_col="mmsi", t="timestamp"

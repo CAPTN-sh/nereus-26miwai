@@ -14,7 +14,9 @@ pipeline_steps:
     "drop_speed_outlier",
     "interpolate",
     "smooth_traj",
-    "add_cols"
+    "add_cols",
+    "add_geo_cols",
+    "static_cols"
   ]
 
 filter_around_kiel:
@@ -157,6 +159,14 @@ add_cols:
       overwrite: True
       name: "angular_difference"
 
+  - function: preprocessing.steps.transform.nodes.outliers.detect_outliers
+    args:
+      in_col_name: "status"
+      operator: eq
+      value: 0
+      out_col_name: "using_engine"
+
+add_geo_cols:
   - function: preprocessing.steps.transform.nodes.geo_features.add_within_map
     args: 
       layer: "waterways"
@@ -180,3 +190,11 @@ add_cols:
       at_index: -1
       layers: ["ferry_stop", "marina", "restricted"]
       max_dist: 500
+
+static_cols:
+  - function: preprocessing.steps.transform.nodes.outliers.detect_outliers
+    args:
+      in_col_name: "ship_type"
+      operator: eq
+      value: 36
+      out_col_name: "sailing_vessel"
