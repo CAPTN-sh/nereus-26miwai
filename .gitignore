@@ -1,5 +1,8 @@
-*.pyc
 *.png
-weights/
-data/
-bin/
+*.pth
+__pycache__
+bin
+trash
+data
+weights
+.history

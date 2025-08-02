@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=64.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nereus"
+version = "2.0.0"
+license = { file = "LICENSE" }
+description = "Context-aware Surface Vessels Trajectory Analysis and Prediction"
+readme = "README.md"
+authors = [
+    { name = "Ben Biesenbach", email = "stu232913@mail.uni-kiel.de" }
+    { name = "Ghassan Al-Falouji", email = "gaf@informatik.uni-kiel.de" },
+]
+
+requires-python = ">=3.12, <3.13"
+dependencies = [
+    "contextily",
+    "dotsi",
+    "pandas",
+    "pyais",
+    "geopandas",
+    "movingpandas",
+    "geopy",
+    "tqdm",
+    "matplotlib",
+    "SciencePlots",
+    "numpy",
+    "pygame",
+    "PyYAML",
+    "scipy",
+    "shapely",
+    "torch >=2.5.0",
+    "torchvision >=0.20.0",
+    "flwr",
+    "ray",
+    "datasets",
+    "huggingface_hub",
+    "scikit-learn (>=1.6.1,<2.0.0)",
+    "dask (>=2025.2.0,<2026.0.0)",
+    "causal-learn (>=0.1.4.1,<0.2.0.0)",
+    "seaborn (>=0.13.2,<0.14.0)",
+]
+
+[project.optional-dependencies]
+jupyter = [
+    "ipykernel", # for Jupyter kernel interaction
+    "ipympl",
+    "ipython", # for interactive Python
+    "ipywidgets", # for interactive widgets
+    "jupyter",
+    "jupyter-client",
+    "jupyter-core",
+    "jupyterlab_widgets", # for JupyterLab widgets
+    "mpl-tools",
+    "mplcursors",
+    "nb-conda-store-kernels", # for managing conda environments as Jupyter kernels
+    "nbclean", # for cleaning up notebook files
+    "nbresuse", # resource reuse in notebooks
+    "notebook",
+    "traitlets", # for managing configuration
+    "jupyter-contrib-nbextensions", # for Jupyter extensions
+]
+
+lint = [
+    "flake8",
+    "isort",
+    "mypy",
+    "black"
+]
+
+[tool.poetry.group.dev]  # Add development dependencies by default
+dependencies = { jupyter = ["*"], lint = ["*"] } # "*" installs all in the group
+
+[tool.poetry]
+packages = [
+    { include = "onsa", from = "src" }
+]
+
+# [tool.poetry.scripts]
+## Example script definition (if needed) - useful for dev tasks
+# run-dev = "python -m onsa.some_module" # Replace with actual module/script

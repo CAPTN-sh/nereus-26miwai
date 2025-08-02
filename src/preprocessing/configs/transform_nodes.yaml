@@ -1,0 +1,202 @@
+paths:
+  in_folder: "data/kiel/ais/2_decoded"
+  out_folder: "data/kiel/ais/3_features"
+
+global_args:
+  min_obs: 10
+
+pipeline_steps:
+  [
+    "filter_around_kiel",
+    "split_at_ferry_stop",
+    "split_at_marina",
+    "split_traj",
+    "drop_speed_outlier",
+    "interpolate",
+    "smooth_traj",
+    "add_cols",
+    "add_geo_cols",
+    "static_cols"
+  ]
+
+filter_around_kiel:
+  - function: preprocessing.steps.transform.nodes.geo_features.add_within_map
+    args: 
+      layer: "water"
+      col_name: "in_fjord"
+
+  - function: preprocessing.steps.transform.nodes.outliers.detect_outliers
+    args: 
+      in_col_name: "in_fjord"
+      operator: eq
+      value: 0
+
+split_at_ferry_stop: 
+  - function: preprocessing.steps.transform.nodes.geo_features.add_within_map
+    args: 
+      layer: "ferry_stop"
+      col_name: "in_ferry_stop"
+
+  - function: preprocessing.steps.transform.nodes.mp_wrapper.split
+    args: 
+      cls: movingpandas.ValueChangeSplitter
+      col_name: "in_ferry_stop"
+
+  - function: preprocessing.steps.transform.nodes.outliers.detect_outliers
+    args: 
+      in_col_name: "in_ferry_stop"
+      operator: eq
+      value: 1
+
+split_at_marina:
+
+  - function: preprocessing.steps.transform.nodes.geo_features.add_within_map
+    args: 
+      layer: "marina"
+      col_name: "in_marina"
+
+  - function: preprocessing.steps.transform.nodes.mp_wrapper.split
+    args: 
+      cls: movingpandas.ValueChangeSplitter
+      col_name: "in_marina"
+
+  - function: preprocessing.steps.transform.nodes.outliers.detect_outliers
+    args: 
+      in_col_name: "in_marina"
+      operator: eq
+      value: 1
+
+split_traj:
+  - function: preprocessing.steps.transform.nodes.mp_wrapper.split
+    args:
+      cls: movingpandas.ObservationGapSplitter
+      gap: timedelta_in_min_10
+
+  - function: preprocessing.steps.transform.nodes.mp_wrapper.split
+    args:
+      cls: movingpandas.SpeedSplitter
+      speed: 0.2
+      duration: timedelta_in_min_10
+
+  - function: preprocessing.steps.transform.nodes.mp_wrapper.split
+    args:
+      cls: movingpandas.StopSplitter
+      max_diameter: 50
+      min_duration: timedelta_in_min_10
+
+# not distance (uneven timeinterval -> uneven distance)
+
+drop_speed_outlier:
+  - method: add_speed
+    args: 
+      overwrite: False
+      name: "calc_speed"
+      units: ["nm", "h"]
+
+  - function: preprocessing.steps.transform.nodes.outliers.detect_outliers
+    args:
+      in_col_name: "calc_speed"
+      value: 30
+      operator: gt
+
+  - function: preprocessing.steps.transform.nodes.outliers.detect_outliers
+    args: 
+      in_col_name: "calc_speed"
+      measures: [scipy.stats.zscore] # no abs, only remove high speed outlier
+      operator: gt
+      value: 3
+
+interpolate:
+  - function: preprocessing.steps.transform.nodes.interpolate.interpolate
+    args: 
+      interp_cols: ["lat", "lon", "speed", "course"]
+      ff_cols: ["turn", "heading", "status", "accuracy", "raim", "ship_type", "to_bow", "to_stern", "to_port", "to_starboard"]
+
+smooth_traj:
+  - function: preprocessing.steps.transform.nodes.mp_wrapper.smooth
+    args:
+      cls: movingpandas.trajectory_smoother.KalmanSmootherCV
+
+add_cols:
+  - method: add_speed
+    args: 
+      overwrite: True
+      name: "calc_speed"
+      units: ["nm", "h"]
+
+  - function: preprocessing.steps.transform.nodes.others.smooth_col
+    args:
+      col_name: "calc_speed"
+      savgol_len: 7
+      whittaker_lambda: 50
+
+  - method: add_acceleration
+    args: 
+      overwrite: True
+      name: "calc_acc"
+      units: ["nm", "h", "h"]
+
+  - function: preprocessing.steps.transform.nodes.outliers.detect_outliers
+    args:
+      in_col_name: "calc_speed"
+      operator: lt
+      value: 1
+      out_col_name: "low_speed"
+
+  - method: add_direction
+    args: 
+      overwrite: True
+      name: "direction"
+
+  - function: preprocessing.steps.transform.nodes.others.merge_cols
+    args:
+      trigger_col: "low_speed"
+      merge_cols:
+        "direction": ["course", "direction"]
+
+  - method: add_angular_difference
+    args:
+      overwrite: True
+      name: "angular_difference"
+
+  - function: preprocessing.steps.transform.nodes.outliers.detect_outliers
+    args:
+      in_col_name: "status"
+      operator: eq
+      value: 0
+      out_col_name: "using_engine"
+
+add_geo_cols:
+  - function: preprocessing.steps.transform.nodes.geo_features.add_within_map
+    args: 
+      layer: "waterways"
+      col_name: "in_waterways"
+
+  - function: preprocessing.steps.transform.nodes.geo_features.add_distance_to_map_layer
+    args: 
+      layer: "districts"
+      col_name: "distance_shore"
+
+  - function: preprocessing.steps.transform.nodes.geo_features.add_closest_map_feature
+    args:
+      col_name: "origin"
+      at_index: 0
+      layers: ["ferry_stop", "marina", "restricted"]
+      max_dist: 500
+      add_centroid: True
+
+  - function: preprocessing.steps.transform.nodes.geo_features.add_closest_map_feature
+    args:
+      col_name: "destination"
+      at_index: -1
+      layers: ["ferry_stop", "marina", "restricted"]
+      max_dist: 500
+      add_centroid: True
+
+static_cols:
+  - function: preprocessing.steps.transform.nodes.outliers.detect_outliers
+    args:
+      in_col_name: "ship_type"
+      operator: eq
+      value: 36
+      out_col_name: "sailing_vessel"

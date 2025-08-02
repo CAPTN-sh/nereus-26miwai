@@ -1,0 +1,108 @@
+# for detailed information see:
+# https://support.marinetraffic.com/en/articles/9552866-what-is-the-significance-of-the-ais-shiptype-or-vessel-type-number
+
+"Not available": 0
+"Reserved": 10
+"Reserved for future use": 10
+"Wing in ground ": 20
+"Wing in ground A": 21
+"Wing in ground B": 22
+"Wing in ground C": 23
+"Wing in ground D": 24
+"Fishing": 30
+"Fishing Vessel": 30
+"Fishery Research Vessel": 30
+"Fishery Patrol Vessel": 30
+"Trawler": 30
+"Tug": 31
+"Tug/Supply Vessel": 31
+"Towing": 31
+"Dredger": 33
+"Dredging or underwater ops": 33
+"Backhoe Dredger": 33
+"Trailing Suction Hopper Dredger": 33
+"Grab Dredger": 33
+"Diving ops": 34
+"Diving Support Vessel": 34
+"Military ops": 35
+"Naval Patrol Vessel": 35
+"Naval Research Vessel": 35
+"Combat Vessel": 35
+"Sailing": 36
+"Sailing Vessel": 36
+"Pleasure Craft": 37
+"Yacht": 37
+"Exhibition Ship": 37
+"Museum Ship": 37
+"High speed craft": 40
+"Pilot Vessel": 50
+"Standby Safety Vessel": 51
+"Search and Rescue vessel": 51
+"Pusher Tug": 52
+"Port Tender": 53
+"Crew Boat": 53
+"Pollution Control Vessel": 54
+"Anti-pollution equipment": 54
+"Law Enforcement": 55
+"Patrol Vessel": 55
+"Local Vessel": 56
+"Utility Vessel": 59
+"Motor Hopper": 59
+"Offshore Supply Ship": 59
+"Research/Survey Vessel": 59
+"Anchor Handling Vessel": 59
+"Buoy-laying Vessel": 59
+"Cable Layer": 59
+"Work Vessel": 59
+"Pontoon": 59
+"Crane Ship": 59
+"Replenishment Vessel": 59
+"Multi Purpose Offshore Vessel": 59
+"Offshore Construction Jack Up": 59
+"Heavy Lift Vessel": 59
+"Training Ship": 59
+"Passenger": 60
+"Passengers Ship": 60
+"Ro-Ro/Passenger Ship": 60
+"Accommodation Ship": 60
+"Passenger A": 61
+"Passenger B": 62
+"Passenger C": 63
+"Passenger D": 64
+"Cargo": 70
+"General Cargo": 70
+"Container Ship": 70
+"Vehicles Carrier": 70
+"Bulk Carrier": 70
+"Ro-Ro Cargo": 70
+"Cement Carrier": 70
+"Cargo/Container Ship": 70
+"Deck Cargo Ship": 70
+"Reefer": 70
+"Pallet Carrier": 70
+"Stone Carrier": 70
+"Limestone Carrier": 70
+"Heavy Load Carrier": 70
+"Self Discharging Bulk Carrier": 70
+"Deck Cargo Pontoon": 70
+"Cargo A": 71
+"Cargo B": 72
+"Cargo C": 73
+"Cargo D": 74
+"Tanker": 80
+"Oil/Chemical Tanker": 80
+"Chemical Tanker": 80
+"Asphalt/Bitumen Tanker": 80
+"Oil Products Tanker": 80
+"Bunkering Tanker": 80
+"Co2 Tanker": 80
+"Edible Oil Tanker": 80
+"Lpg/Chemical Tanker": 80
+"Tanker A": 81
+"Tanker B": 82
+"Tanker C": 83
+"Tanker D": 84
+"Lng Tanker": 84
+"Lpg Tanker": 84
+"Other Type": 90
+"Other": 90
