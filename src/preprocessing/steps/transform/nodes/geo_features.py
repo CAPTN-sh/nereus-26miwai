@@ -48,46 +48,57 @@ def add_distance_to_map_layer(
     return trajectories
 
 
-def add_clostest_map_feature(
+def add_closest_map_feature(
     trajectories: Iterable[Trajectory],
     col_name: str,
     at_index: int,
     layers: List[str],
     max_dist=float("inf"),
+    add_centroid=False,
 ) -> Iterable[Trajectory]:
     """
-    Finds the clostest polygon and the distance to it in meters.
+    Finds the closest polygon and the distance to it in meters.
 
     Args:
         trajectories (Iterable[Trajectory]): Traj to apply the function on.
-        col_name (str): Name of the column storing the clostest polygons name.
+        col_name (str): Name of the column storing the closest polygons name.
         at_index (int): Index of the Point in the DataFrame.
         layers (List[str]): The maps layers names that store polygons.
         max_dist (float): Max distance at which the name "unknown" is stored.
+        add_centroid (bool): Add centroid of polygon.
 
     Return:
-        str: Name of the clostest polygon.
-        float: Distance to the clostest polygon in meters.
+        Iterable[Trajectory]: Trajectories with additional column.
     """
-    ploy_dict = MapLoader().get_features(layers, "EPSG:32632").geometry
+    poly_dict = MapLoader().get_features(layers, "EPSG:32632").geometry
+    poly_dict_lat_lon = MapLoader().get_features(layers).geometry
     for traj in trajectories:
         df_geo = traj.df.to_crs("EPSG:32632").geometry
-        closest_id, dist = _closest_polygon(df_geo.iloc[at_index], ploy_dict)
-        traj.df[col_name] = closest_id if dist <= max_dist else "unknown"
+        closest_id, dist = _closest_polygon(df_geo.iloc[at_index], poly_dict)
+        if dist <= max_dist:
+            traj.df[col_name] = closest_id
+            if add_centroid:
+                traj.df[f"{col_name}_lat"] = poly_dict_lat_lon[closest_id].centroid.y
+                traj.df[f"{col_name}_lon"] = poly_dict_lat_lon[closest_id].centroid.x
+        else:
+            traj.df[col_name] = "unknown"
+            if add_centroid:
+                traj.df[f"{col_name}_lat"] = -999
+                traj.df[f"{col_name}_lon"] = -999
     return trajectories
 
 
 def _closest_polygon(point: Point, polygons: dict[str, Polygon]) -> Tuple[str, float]:
     """
-    Finds the clostest polygon and the distance to it in meters.
+    Finds the closest polygon and the distance to it in meters.
 
     Args:
         point (Point): Point of interest.
         polygons (dict[str, Polygon]): Dict with the polygons and thier names.
 
     Return:
-        str: name of the clostest polygon
-        float: distance to the clostest polygon in meters
+        str: name of the closest polygon
+        float: distance to the closest polygon in meters
     """
     min_dist = float("inf")
     closest_id = None

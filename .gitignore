@@ -1,3 +1,5 @@
+*.png
+*.pth
 __pycache__
 bin
 trash

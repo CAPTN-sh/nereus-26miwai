@@ -177,19 +177,21 @@ add_geo_cols:
       layer: "districts"
       col_name: "distance_shore"
 
-  - function: preprocessing.steps.transform.nodes.geo_features.add_clostest_map_feature
+  - function: preprocessing.steps.transform.nodes.geo_features.add_closest_map_feature
     args:
       col_name: "origin"
       at_index: 0
       layers: ["ferry_stop", "marina", "restricted"]
       max_dist: 500
+      add_centroid: True
 
-  - function: preprocessing.steps.transform.nodes.geo_features.add_clostest_map_feature
+  - function: preprocessing.steps.transform.nodes.geo_features.add_closest_map_feature
     args:
       col_name: "destination"
       at_index: -1
       layers: ["ferry_stop", "marina", "restricted"]
       max_dist: 500
+      add_centroid: True
 
 static_cols:
   - function: preprocessing.steps.transform.nodes.outliers.detect_outliers
