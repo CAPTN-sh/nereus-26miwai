@@ -4,17 +4,21 @@ from desire.utils import SCFParams
 from desire.nn import SocialPool
 from desire.utils import SocialPoolingParams, get_scene, get_fc_act, SCFParams
 import numpy as np
+from desire.utils.normalizer import TorchNormalizer
 
 
 class SCF(nn.Module):
-    def __init__(self, index, params: SCFParams):
+    def __init__(self, index, params: SCFParams, normalizer: TorchNormalizer):
         super(SCF, self).__init__()
         self.params = params
         self.index = index
         self.velocity_fc = get_fc_act(params.velocity_fc)
         self.sp_nn = SocialPool(index, SocialPoolingParams())
+        self.normalizer = normalizer
 
-    def forward(self, hidden, y_pred, y_pred_rel, velocity, scene, x_start, seq_start_end=None):
+    def forward(
+        self, hidden, y_pred, y_pred_rel, velocity, scene, x_start, seq_start_end=None
+    ):
 
         vel_out = self.velocity_fc(y_pred_rel)
         # print(y_pred.device,
@@ -22,7 +26,7 @@ class SCF(nn.Module):
         #       hidden.device,
         #       vel_out.device)
 
-        scene_out = get_scene(scene, y_pred, self.params.scene_size)
+        scene_out = get_scene(scene, y_pred, self.params.scene_size, self.normalizer)
 
         # print("scene out device", scene_out.device)
         sp_out = self.sp_nn(y_pred, x_start, hidden, seq_start_end)
@@ -50,4 +54,3 @@ if __name__ == "__main__":
     scene = torch.randn(32, 720 // 2, 576 // 2).to(device)
 
     m = scf(hidden, y, v, scene, x_start)
-
