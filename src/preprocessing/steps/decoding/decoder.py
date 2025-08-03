@@ -28,6 +28,8 @@ class Decoder:
 
     def __init__(self) -> None:
         self.raw_data = []
+        self.successes = 0
+        self.errors = 0
         self.buffer = defaultdict(list)
         self.timestamps = {}
 
@@ -44,7 +46,7 @@ class Decoder:
         self.raw_data = []
         for path in paths:
             self._decode_nmea_file(path)
-        return self.raw_data
+        return self.raw_data, self.successes, self.errors
 
     def _decode_nmea_file(self, path: Path) -> None:
         """
@@ -97,9 +99,13 @@ class Decoder:
             aivdm_line (str): Single part message to decode.
             timestamp (str): Timestamp when the message was received.
         """
-        result = decode(aivdm_line).asdict()
-        result["timestamp"] = timestamp
-        self.raw_data.append(result)
+        try:
+            result = decode(aivdm_line).asdict()
+            result["timestamp"] = timestamp
+            self.raw_data.append(result)
+            self.successes += 1
+        except Exception:
+            self.errors += 1
 
     def _decode_multi_part(self, fragment_id: str) -> None:
         """

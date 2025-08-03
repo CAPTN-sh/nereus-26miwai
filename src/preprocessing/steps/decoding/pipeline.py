@@ -25,12 +25,17 @@ class DecodingPipeline(Pipeline):
         return task_iter(), task_count
 
     def execut_task(self, date, paths):
-        raw_data = Decoder().decode_files(paths)
+        raw_data, successes, errors = Decoder().decode_files(paths)
+        df_raw = pd.DataFrame(raw_data)
+        if df_raw.empty:
+            return (successes, errors)
 
         for name, schema in self.config["tables"].items():
             columns = list(schema["column_types"].keys())
             msg_types = schema["msg_types"]
             df = pd.DataFrame(raw_data)
+            if "msg_type" not in df.columns:
+                continue
             df = df[df["msg_type"].isin(msg_types)][columns]
 
             for c_name, c_type in schema["column_types"].items():
@@ -43,7 +48,11 @@ class DecodingPipeline(Pipeline):
                 index=False,
                 engine="pyarrow",
             )
-        return None
+        return (successes, errors)
 
     def save_results(self, results):
-        pass
+        first_sum = sum(x[0] for x in results)
+        second_sum = sum(x[1] for x in results)
+
+        print("Successfully decoded:", first_sum)
+        print("Failed to decode:", second_sum)
