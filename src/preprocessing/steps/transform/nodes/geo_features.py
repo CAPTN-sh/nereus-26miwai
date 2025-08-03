@@ -3,6 +3,7 @@ from typing import Iterable
 from utils.map_loader import MapLoader
 from shapely.geometry import Point, Polygon
 from typing import Tuple, List
+import geopandas as gpd
 
 
 def add_within_map(
@@ -71,15 +72,16 @@ def add_closest_map_feature(
         Iterable[Trajectory]: Trajectories with additional column.
     """
     poly_dict = MapLoader().get_features(layers, "EPSG:32632").geometry
-    poly_dict_lat_lon = MapLoader().get_features(layers).geometry
+    centroids = gpd.GeoSeries(poly_dict.centroid, crs="EPSG:32632").to_crs("EPSG:4326")
+    centroids = {name: centroid for name, centroid in zip(poly_dict.index, centroids)}
     for traj in trajectories:
         df_geo = traj.df.to_crs("EPSG:32632").geometry
         closest_id, dist = _closest_polygon(df_geo.iloc[at_index], poly_dict)
         if dist <= max_dist:
             traj.df[col_name] = closest_id
             if add_centroid:
-                traj.df[f"{col_name}_lat"] = poly_dict_lat_lon[closest_id].centroid.y
-                traj.df[f"{col_name}_lon"] = poly_dict_lat_lon[closest_id].centroid.x
+                traj.df[f"{col_name}_lat"] = centroids[closest_id].y
+                traj.df[f"{col_name}_lon"] = centroids[closest_id].x
         else:
             traj.df[col_name] = "unknown"
             if add_centroid:

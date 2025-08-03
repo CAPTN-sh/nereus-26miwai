@@ -60,7 +60,7 @@ def get_in_frame_dict(edges, max_dist=None):
 
 
 def extract_frames_worker(args):
-    cur_t, t_range, obs_len, pred_len, max_vessels = args
+    cur_t, t_range, obs_len, pred_len, max_vessels, feat_cols = args
 
     nodes_t = global_nodes[global_nodes["time"].isin(t_range)]
     full_traj_ids = nodes_t["traj_id"].unique()
@@ -96,9 +96,7 @@ def extract_frames_worker(args):
             pred_traj = traj[traj["time"].isin(pred_range)]
 
             obs_traj_abs.append(obs_traj[["lat", "lon"]].to_numpy())
-            obs_traj_rel.append(
-                obs_traj[["rel_lat", "rel_lon", "sailing_vessel"]].to_numpy()
-            )
+            obs_traj_rel.append(obs_traj[["rel_lat", "rel_lon"] + feat_cols].to_numpy())
             pred_traj_abs.append(pred_traj[["lat", "lon"]].to_numpy())
             pred_traj_rel.append(pred_traj[["rel_lat", "rel_lon"]].to_numpy())
 
@@ -150,7 +148,13 @@ class TrajectoryDataset(Dataset):
         nodes = nodes[nodes["time"] < nodes["time"].max() / 1500]
 
         nodes = nodes.sort_values(by=["timestamp", "traj_id"])
-        nodes[["lat", "lon"]] = normalizer.normalize(nodes[["lat", "lon"]])
+        norm_cols = [
+            ["lat", "lon"],
+            ["origin_lat", "origin_lon"],
+            ["destination_lat", "destination_lon"],
+        ]
+        for points in norm_cols:
+            nodes[points] = normalizer.normalize(nodes[points])
 
         sailing_trajs = nodes[nodes["sailing_vessel"]]["traj_id"].unique()
 
@@ -163,12 +167,16 @@ class TrajectoryDataset(Dataset):
             "to_stern": 10,
             "to_port": 10,
             "to_starboard": 10,
+            "origin_lat": 1,
+            "origin_lon": 1,
+            "destination_lat": 1,
+            "destination_lon": 1,
         }
         nodes = nodes[
             ["time", "mmsi", "traj_id", "lat", "lon"] + list(feat_cols_norm.keys())
         ]
 
-        for key, norm_val in feat_cols_norm:
+        for key, norm_val in feat_cols_norm.items():
             nodes[key] = nodes[key].astype(float) / norm_val
 
         mmsis_in_frame = get_in_frame_dict(edges)
@@ -179,7 +187,16 @@ class TrajectoryDataset(Dataset):
         args_list = []
         for cur_t in range(min_cur_t, max_cur_t):
             t_range = list(range(cur_t - obs_len, cur_t + pred_len))
-            args_list.append((cur_t, t_range, obs_len, pred_len, max_vessels))
+            args_list.append(
+                (
+                    cur_t,
+                    t_range,
+                    obs_len,
+                    pred_len,
+                    max_vessels,
+                    list(feat_cols_norm.keys()),
+                )
+            )
 
         # TODO limit cpu_count() to 10-20 for server
         with Pool(

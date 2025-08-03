@@ -87,7 +87,7 @@ def train(
     normalizer = normalizer.to_TorchNormalizer().to(device)
 
     sgm_params = SGMParams()
-    sgm_params.rnn_enc_x_params.input_size = 2 + 8
+    sgm_params.rnn_enc_x_params.input_size = 2 + 12
 
     desire = DESIRE(IOCParams(), sgm_params, normalizer)
     desire = desire.to(device)
