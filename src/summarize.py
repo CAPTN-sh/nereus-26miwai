@@ -34,8 +34,11 @@ for col in columns:
 df_summary_full = pd.concat([df_summary, missing_df]).sort_index()
 mask = df_summary_full.select_dtypes(include="number").sum(axis=1) == 0
 df_summary_full.loc[mask] = np.nan
+df_summary_full.reset_index()
+df_summary_full["mmsi"] = df_summary_full["mmsi"].astype("Int64")
 
-
+print(f"Min mmsi: {df_summary_full["mmsi"].min()}")
+print(f"Max mmsi: {df_summary_full["mmsi"].max()}")
 print(f"Total rows: {len(df_summary_full)}")
 print(f"Rows fully zero: {mask.sum()}")
 print(df_summary_full.isna().sum())
