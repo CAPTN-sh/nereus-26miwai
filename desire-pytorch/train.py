@@ -71,7 +71,7 @@ def train(
         batch_size=batch_size,
         num_workers=10,
         min_date="2022-04-15",
-        max_date="2022-04-17",
+        max_date="2022-04-15",  # 227002
         # max_date="2022-06-07",
     )
     print("additional features:", train_dset.add_feats)
@@ -83,7 +83,7 @@ def train(
         batch_size=batch_size,
         num_workers=10,
         min_date="2022-06-08",
-        max_date="2022-06-09",
+        max_date="2022-06-08",
         # max_date="2022-06-15",
     )
 
@@ -105,6 +105,9 @@ def train(
 
     desire = DESIRE(IOCParams(), sgm_params, normalizer)
     desire = desire.to(device)
+    if torch.cuda.device_count() > 1:
+        logger.info(f"Using {torch.cuda.device_count()} GPUs")
+        desire = torch.nn.DataParallel(desire)
 
     image = Image.open(path_of_static_image)
     scene = TF.to_tensor(image)
@@ -119,7 +122,7 @@ def train(
         desire.load_state_dict(restore_dict)
 
     scene = scene.to(device)
-    # scaler = amp.GradScaler()
+    scaler = amp.GradScaler()
 
     for epoch in range(num_epochs):
         sum_loss = 0
@@ -139,10 +142,10 @@ def train(
             pred_traj_gt_rel = pred_traj_gt_rel.permute(1, 2, 0)
 
             x_start = obs_traj[:, :, 0].to(device)
-            # with amp.autocast(device_type="cuda"):
-            y_pred_traj, pred_delta, mean, log_var = desire(
-                obs_traj_rel, pred_traj_gt_rel, x_start, scene, seq_start_end
-            )
+            with amp.autocast(device_type="cuda"):
+                y_pred_traj, pred_delta, mean, log_var = desire(
+                    obs_traj_rel, pred_traj_gt_rel, x_start, scene, seq_start_end
+                )
 
             tloss, (l2l, kld, cel, rl) = total_loss(
                 y_pred_traj, pred_delta, pred_traj_gt_rel, mean, log_var
@@ -156,9 +159,17 @@ def train(
                 l = tloss[s]
                 final_loss[i] = l
             final_loss = final_loss.sum()
+
+            """
             final_loss.backward()
             torch.nn.utils.clip_grad_norm_(desire.parameters(), norm_clip_value)
             optimizer.step()
+            """
+
+            scaler.scale(final_loss).backward()
+            torch.nn.utils.clip_grad_norm_(desire.parameters(), norm_clip_value)
+            scaler.step(optimizer)
+            scaler.update()
 
             sum_loss += final_loss.item() / num_batches
             num_batches_total += 1
@@ -207,10 +218,10 @@ def evaluate(epoch, desire, eval_loader, device, scene, normalizer):
         pred_traj_gt_rel = pred_traj_gt_rel.permute(1, 2, 0)
 
         x_start = obs_traj[:, :, 0]
-
-        y_pred_traj, pred_delta, mean, log_var = desire(
-            obs_traj_rel, pred_traj_gt_rel, x_start, scene, seq_start_end
-        )
+        with amp.autocast(device_type="cuda"):
+            y_pred_traj, pred_delta, mean, log_var = desire(
+                obs_traj_rel, pred_traj_gt_rel, x_start, scene, seq_start_end
+            )
 
         tloss, (l2l, kld, cel, rl) = total_loss(
             y_pred_traj, pred_delta, pred_traj_gt_rel, mean, log_var
@@ -303,7 +314,7 @@ if __name__ == "__main__":
         edges_path,
         path_of_static_image,
         coord_norm_path,
-        batch_size=2048,
+        batch_size=8192,
         num_epochs=20,
-        lr=1e-3,
+        lr=5e-3,
     )
