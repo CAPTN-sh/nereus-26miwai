@@ -106,9 +106,9 @@ def train(
 
     desire = DESIRE(IOCParams(), sgm_params, normalizer)
     desire = desire.to(device)
-    if torch.cuda.device_count() > 1:
-        logger.info(f"Using {torch.cuda.device_count()} GPUs")
-        desire = torch.nn.DataParallel(desire)
+    # if torch.cuda.device_count() > 1:
+    #    logger.info(f"Using {torch.cuda.device_count()} GPUs")
+    #    desire = torch.nn.DataParallel(desire)
 
     image = Image.open(path_of_static_image)
     scene = TF.to_tensor(image)
@@ -163,7 +163,7 @@ def train(
                 y_pred_traj, pred_delta, pred_traj_gt_rel, mean, log_var
             )
             num_batches = seq_start_end.size(0)
-            final_loss = torch.zeros(num_batches)
+            final_loss = torch.zeros(num_batches, device=device)
             for i, (s, e) in enumerate(seq_start_end):
                 s = s.item()
                 # e = e.item()
