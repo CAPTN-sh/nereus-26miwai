@@ -87,10 +87,11 @@ def train(
         # max_date="2022-06-15",
     )
 
-    gpu_id = get_freer_gpu()
-    device = torch.device(
-        f"cuda:{gpu_id}" if gpu_id is not None and torch.cuda.is_available() else "cpu"
-    )
+    # gpu_id = get_freer_gpu()
+    # device = torch.device(
+    #    f"cuda:{gpu_id}" if gpu_id is not None and torch.cuda.is_available() else "cpu"
+    # )
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     logger.info("Device is %s", device)
 
     iterations_per_epoch = len(train_dset) // batch_size
