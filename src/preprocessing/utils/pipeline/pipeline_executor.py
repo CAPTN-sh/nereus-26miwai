@@ -16,8 +16,8 @@ class PipelineExecutor:
 
     def run_parallel(self, max_workers=None):
         with self.pipeline.init_pool(max_workers) as executor:
-            n_tasks = (max_workers or 8) * 8
-            self.submit_task(executor, n_tasks)
+            max_inflight = (max_workers or 8) * 8
+            self.submit_task(executor, max_inflight)
 
             with tqdm(total=self.total, desc=self.desc) as bar:
                 while self.pending:
@@ -29,7 +29,7 @@ class PipelineExecutor:
                     except Exception as err:
                         print(f"Error processing {key}: {err}")
                     bar.update(1)
-                    self.submit_task(executor)
+                    self.submit_task(executor, max(0, max_inflight - len(self.pending)))
                 bar.refresh()
 
         return self.pipeline.save_results(self.results)
