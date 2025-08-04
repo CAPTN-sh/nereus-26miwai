@@ -1,6 +1,6 @@
 paths:
-  in_folder: "data/kiel/ais/2_decoded"
-  out_folder: "data/kiel/ais/3_features"
+  in_folder: "/home/bbiesenbach/data/kiel/ais/2_decoded"
+  out_folder: "/home/bbiesenbach/data/kiel/ais/3_features"
 
 global_args:
   min_obs: 10

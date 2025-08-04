@@ -1,42 +1,23 @@
 from pathlib import Path
 import pandas as pd
-from multiprocessing import Manager, Lock
-from concurrent.futures import ProcessPoolExecutor
 from utils.config import Config
 from preprocessing.steps.transform.nodes.trajectory import TrajectoryProcessor
-from preprocessing.utils.ship_info_system.ship_info import ShipInfo
 from preprocessing.utils.pipeline.pipeline import Pipeline
-
-shared_ship_info = None
-
-
-def init_worker(shared_db, lock):
-    global shared_ship_info
-    shared_ship_info = ShipInfo(shared_db, lock)
 
 
 class NodesPipeline(Pipeline):
     def __init__(self):
         self.config = Config().get("transform_nodes")
 
-    def init_pool(self, max_workers):
-        return ProcessPoolExecutor(
-            max_workers=max_workers,
-            initializer=init_worker,
-            initargs=(Manager().dict(), Lock()),
-        )
-
     def load_tasks(self):
         trajs_df = self._load_data("*_traj.parquet")
-        ships_df = self._load_data("*_ship.parquet")
+        ships_df = self._load_data("ship_info*.parquet")
 
-        ship_groups = dict(tuple(ships_df.groupby("mmsi")))
         task_count = trajs_df["mmsi"].nunique()
 
         def task_iter():
             for mmsi, traj_df in trajs_df.groupby("mmsi"):
-                ship_df = ship_groups.get(mmsi)
-                yield (mmsi, (traj_df, ship_df))
+                yield (mmsi, (traj_df, ships_df))
 
         return task_iter(), task_count
 
@@ -47,7 +28,7 @@ class NodesPipeline(Pipeline):
         return df
 
     def execut_task(self, mmsi, traj_df, ship_df):
-        tp = TrajectoryProcessor(mmsi, traj_df, ship_df, shared_ship_info)
+        tp = TrajectoryProcessor(mmsi, traj_df, ship_df)
 
         for step in self.config["pipeline_steps"]:
             try:

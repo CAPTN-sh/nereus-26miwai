@@ -1,6 +1,6 @@
 paths:
-  in_folder: "data/kiel/ais/3_features"
-  out_folder: "data/kiel/ais/3_features"
+  in_folder: "/home/bbiesenbach/data/kiel/ais/3_features"
+  out_folder: "/home/bbiesenbach/data/kiel/ais/3_features"
 
 max_edge_dist: 2000 # in meters
 

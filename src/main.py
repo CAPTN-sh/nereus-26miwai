@@ -6,6 +6,6 @@ from utils.config import Config
 
 if __name__ == "__main__":
     Config("src/preprocessing/configs/_main.yaml")
-    PipelineExecutor(DecodingPipeline()).run_parallel(max_workers=20)
-    # PipelineExecutor(NodesPipeline()).run_parallel()
+    # PipelineExecutor(DecodingPipeline()).run_parallel(max_workers=20)
+    PipelineExecutor(NodesPipeline()).run_parallel()
     # PipelineExecutor(EdgesPipeline()).run_parallel()

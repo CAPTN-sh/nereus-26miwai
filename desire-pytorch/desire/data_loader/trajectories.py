@@ -47,6 +47,19 @@ def add_time_col(df, min_timestamp):
     return df
 
 
+def load_data(path, min_date, max_date):
+    df = pd.read_parquet(path)
+
+    if max_date is not None:
+        max_date = pd.to_datetime(max_date) + pd.Timedelta(days=1)
+        df = df[df["timestamp"] < max_date]
+    if min_date is not None:
+        min_date = pd.to_datetime(min_date)
+        df = df[df["timestamp"] >= min_date]
+
+    return df.copy().reset_index(drop=True)
+
+
 def get_in_frame_dict(edges, max_dist=None):
     if max_dist is not None:
         edges = edges[edges["dist"] <= max_dist]
@@ -120,6 +133,9 @@ class TrajectoryDataset(Dataset):
         obs_len=8,
         pred_len=12,
         max_vessels=10,
+        min_date=None,
+        max_date=None,
+        num_workers=8,
     ):
         """
         Args:
@@ -137,15 +153,12 @@ class TrajectoryDataset(Dataset):
         self.frames = []
         self.max_vessels = max_vessels
 
-        nodes = pd.read_parquet(nodes_path)
-        edges = pd.read_parquet(edges_path)
+        nodes = load_data(nodes_path, min_date, max_date)
+        edges = load_data(edges_path, min_date, max_date)
 
         min_timestamp = nodes["timestamp"].astype(int).min()
         nodes = add_time_col(nodes, min_timestamp)
         edges = add_time_col(edges, min_timestamp)
-
-        edges = edges[edges["time"] < nodes["time"].max() / 1500]
-        nodes = nodes[nodes["time"] < nodes["time"].max() / 1500]
 
         nodes = nodes.sort_values(by=["timestamp", "traj_id"])
         norm_cols = [
@@ -172,12 +185,12 @@ class TrajectoryDataset(Dataset):
             "destination_lat": 1,
             "destination_lon": 1,
         }
-        nodes = nodes[
-            ["time", "mmsi", "traj_id", "lat", "lon"] + list(feat_cols_norm.keys())
-        ]
+        self.add_feats = list(feat_cols_norm.keys())
+        nodes = nodes[["time", "mmsi", "traj_id", "lat", "lon"] + self.add_feats]
 
         for key, norm_val in feat_cols_norm.items():
             nodes[key] = nodes[key].astype(float) / norm_val
+        self.add_feats = []
 
         mmsis_in_frame = get_in_frame_dict(edges)
 
@@ -188,19 +201,11 @@ class TrajectoryDataset(Dataset):
         for cur_t in range(min_cur_t, max_cur_t):
             t_range = list(range(cur_t - obs_len, cur_t + pred_len))
             args_list.append(
-                (
-                    cur_t,
-                    t_range,
-                    obs_len,
-                    pred_len,
-                    max_vessels,
-                    list(feat_cols_norm.keys()),
-                )
+                (cur_t, t_range, obs_len, pred_len, max_vessels, self.add_feats)
             )
 
-        # TODO limit cpu_count() to 10-20 for server
         with Pool(
-            processes=cpu_count(),
+            processes=num_workers,
             initializer=init_worker,
             initargs=(nodes, sailing_trajs, mmsis_in_frame),
         ) as pool:

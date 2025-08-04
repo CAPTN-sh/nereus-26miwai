@@ -10,7 +10,9 @@ def data_loader(
     pred_len=12,
     max_vessels=10,
     batch_size=20,
-    loader_num_workers=8,
+    num_workers=8,
+    min_date=None,
+    max_date=None,
 ):
     dset = TrajectoryDataset(
         nodes_path,
@@ -19,13 +21,16 @@ def data_loader(
         obs_len=obs_len,
         pred_len=pred_len,
         max_vessels=max_vessels,
+        min_date=min_date,
+        max_date=max_date,
+        num_workers=num_workers,
     )
 
     loader = DataLoader(
         dset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=loader_num_workers,
+        num_workers=num_workers,
         collate_fn=seq_collate,
     )
     return dset, loader

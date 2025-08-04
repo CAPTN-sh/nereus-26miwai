@@ -69,8 +69,22 @@ def train(
         edges_path,
         normalizer=normalizer,
         batch_size=batch_size,
-        loader_num_workers=4,
+        num_workers=20,
+        max_date="2022-03-15",
+        max_date="2022-06-15",
     )
+    print("additional features:", train_dset.add_feats)
+
+    eval_dset, eval_loader = data_loader(
+        nodes_path,
+        edges_path,
+        normalizer=normalizer,
+        batch_size=batch_size,
+        num_workers=20,
+        min_date="2023-05-01",
+        max_date="2023-05-07",
+    )
+
     gpu_id = get_freer_gpu()
     device = torch.device(
         f"cuda:{gpu_id}" if gpu_id is not None and torch.cuda.is_available() else "cpu"
@@ -78,8 +92,6 @@ def train(
     logger.info("Device is %s", device)
 
     iterations_per_epoch = len(train_dset) // batch_size
-    if num_epochs:
-        num_iterations = int(iterations_per_epoch * num_epochs)
 
     logger.info("There are {} traj loaded".format(len(train_dset)))
     logger.info("There are {} iterations per epoch".format(iterations_per_epoch))
@@ -87,7 +99,7 @@ def train(
     normalizer = normalizer.to_TorchNormalizer().to(device)
 
     sgm_params = SGMParams()
-    sgm_params.rnn_enc_x_params.input_size = 2 + 12
+    sgm_params.rnn_enc_x_params.input_size = 2 + len(train_dset.add_feats)
 
     desire = DESIRE(IOCParams(), sgm_params, normalizer)
     desire = desire.to(device)
@@ -108,11 +120,11 @@ def train(
     # scaler = amp.GradScaler()
 
     for epoch in range(num_epochs):
+        sum_loss = 0
         for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch}")):
             # logging.info("epoch {} :batch_idx {}, ".format(epoch, batch_idx))
             optimizer.zero_grad()
 
-            # TODO right order?
             obs_traj, pred_traj_gt, obs_traj_rel, pred_traj_gt_rel, seq_start_end = [
                 tensor.to(device) for tensor in batch
             ]
@@ -134,7 +146,7 @@ def train(
             )
             num_batches = seq_start_end.size(0)
             final_loss = torch.zeros(num_batches)
-            for i, (s, e) in enumerate(seq_start_end[0:-2]):
+            for i, (s, e) in enumerate(seq_start_end):
                 s = s.item()
                 e = e.item()
                 l = tloss[s:e].sum()
@@ -144,34 +156,82 @@ def train(
             torch.nn.utils.clip_grad_norm_(desire.parameters(), norm_clip_value)
             optimizer.step()
 
-        loss_str = str(tloss.mean().item())
+            sum_loss += tloss.mean().item()
+        loss_str = str(sum_loss / iterations_per_epoch)
 
-        logging.info(
-            "Total loss {}; epoch = {}; batch_idx = {}".format(
-                loss_str, epoch, batch_idx
-            )
-        )
+        logging.info("Total loss {}; epoch = {}".format(loss_str, epoch))
         logging.info(
             "L2L {}; RL {}; CEL {}; KLD {};".format(
                 l2l.item(), rl.item(), cel.item(), kld.item()
             )
         )
 
-        if epoch % 10 != 0:
+        if epoch % 1 != 0:
             continue
 
-        plot_traj(epoch, loss_str, obs_traj, pred_traj_gt, y_pred_traj, normalizer)
+        evaluate(epoch, desire, eval_loader, device, scene, normalizer)
 
-        weight_save_path = "desire-pytorch/weights/iter_{}.pth".format(
-            str(epoch).zfill(3)
+        if False:
+            weight_save_path = "desire-pytorch/weights/iter_{}.pth".format(
+                str(epoch).zfill(3)
+            )
+            logging.info(
+                "Saving weights for epoch {} in {}".format(epoch, weight_save_path)
+            )
+            torch.save(desire.state_dict(), weight_save_path)
+            logging.info(
+                "Done saving weights for epoch {} in {}".format(epoch, weight_save_path)
+            )
+
+
+def evaluate(epoch, desire, eval_loader, device, scene, normalizer):
+    desire.eval()
+    total_loss_val = 0
+    total_l2l, total_kld, total_cel, total_rl = 0, 0, 0, 0
+    num_batches_total = 0
+
+    for batch in tqdm(eval_loader, desc="Evaluating"):
+        obs_traj, pred_traj_gt, obs_traj_rel, pred_traj_gt_rel, seq_start_end = [
+            tensor.to(device) for tensor in batch
+        ]
+
+        obs_traj = obs_traj.permute(1, 2, 0)
+        pred_traj_gt = pred_traj_gt.permute(1, 2, 0)
+        obs_traj_rel = obs_traj_rel.permute(1, 2, 0)
+        pred_traj_gt_rel = pred_traj_gt_rel.permute(1, 2, 0)
+
+        x_start = obs_traj[:, :, 0]
+
+        y_pred_traj, pred_delta, mean, log_var = desire(
+            obs_traj_rel, pred_traj_gt_rel, x_start, scene, seq_start_end
         )
-        logging.info(
-            "Saving weights for epoch {} in {}".format(epoch, weight_save_path)
+
+        tloss, (l2l, kld, cel, rl) = total_loss(
+            y_pred_traj, pred_delta, pred_traj_gt_rel, mean, log_var
         )
-        torch.save(desire.state_dict(), weight_save_path)
-        logging.info(
-            "Done saving weights for epoch {} in {}".format(epoch, weight_save_path)
-        )
+
+        total_loss_val += tloss.mean().item()
+        total_l2l += l2l.item()
+        total_kld += kld.item()
+        total_cel += cel.item()
+        total_rl += rl.item()
+        num_batches_total += 1
+
+    avg_loss = total_loss_val / num_batches_total
+    avg_l2l = total_l2l / num_batches_total
+    avg_kld = total_kld / num_batches_total
+    avg_cel = total_cel / num_batches_total
+    avg_rl = total_rl / num_batches_total
+
+    logger.info(f"[Eval] Avg Loss: {avg_loss:.4f}")
+    logger.info(
+        f"[Eval] L2L: {avg_l2l:.4f}, KLD: {avg_kld:.4f}, CEL: {avg_cel:.4f}, RL: {avg_rl:.4f}"
+    )
+
+    plot_traj(epoch, avg_loss, obs_traj, pred_traj_gt, y_pred_traj, normalizer)
+
+    desire.train()  # restore training mode afterward
+    return avg_loss
 
 
 def plot_traj(
@@ -187,7 +247,7 @@ def plot_traj(
     y_pred_abs = start_abs + y_pred_traj.cumsum(dim=2)
 
     def plot_trajectories(ax, traj, color):
-        for i in range(min(3, traj.shape[0])):
+        for i in range(min(5, traj.shape[0])):
             traj_i = traj[i].detach().permute(1, 0)
             traj_i = normalizer.denormalize(traj_i).cpu()
             xs = traj_i[:, 1].numpy()
@@ -218,9 +278,12 @@ def plot_traj(
 if __name__ == "__main__":
     print(os.getcwd())
     mp.set_start_method("spawn", force=True)
-
-    nodes_path = Path("data/kiel/ais/3_features/nodes.parquet").resolve()
-    edges_path = Path("data/kiel/ais/3_features/edges.parquet").resolve()
+    nodes_path = Path(
+        "/home/bbiesenbach/data/kiel/ais/3_features/nodes.parquet"
+    ).resolve()
+    edges_path = Path(
+        "/home/bbiesenbach/data/kiel/ais/3_features/edges.parquet"
+    ).resolve()
     path_of_static_image = Path("scene_encoded.png").resolve()
     coord_norm_path = Path("normalization_stats.npy").resolve()
 
@@ -231,7 +294,7 @@ if __name__ == "__main__":
         edges_path,
         path_of_static_image,
         coord_norm_path,
-        batch_size=4,
-        num_epochs=100,
-        lr=1e-4,
+        batch_size=2048,
+        num_epochs=20,
+        lr=1e-3,
     )

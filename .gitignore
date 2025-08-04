@@ -1,8 +1,12 @@
 *.png
 *.pth
+*nmea.txt
+*parquet
+
 __pycache__
 bin
-trash
-data
 weights
 .history
+
+!data/kiel/ais/2_decoded/ship_info.parquet
+!data/kiel/ais/2_decoded/ship_info_crawler.parquet

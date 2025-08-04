@@ -1,9 +1,12 @@
 # for pandas to handle NaNs use the following types: 
 # Int64, Float64, boolean, string, category, datetime
 
+# "/data1/aistraj/ais/ais/raw"  "data/kiel/ais/1_raw"
+# "/home/bbiesenbach/data/kiel/ais/2_decoded"   "data/kiel/ais/2_decoded"
+
 paths:
-    in_folder: "/data1/aistraj/ais/ais/raw" #"data/kiel/ais/1_raw"
-    out_folder: "/home/bbiesenbach/data/kiel/ais/2_decoded" #"data/kiel/ais/2_decoded"
+    in_folder: "/data1/aistraj/ais/ais/raw"
+    out_folder: "data/kiel/ais/2_decoded"
 
 tables:
     traj:
