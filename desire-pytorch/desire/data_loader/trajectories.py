@@ -15,11 +15,11 @@ global_sailing_trajs = None
 global_mmsis_in_frame = None
 
 
-def init_worker(nodes_path, edges_path, min_date, max_date, normalizer):
+def init_worker(nodes, sailing_trajs, mmsis_in_frame):
     global global_nodes, global_sailing_trajs, global_mmsis_in_frame
-    global_nodes, global_sailing_trajs, global_mmsis_in_frame = load_worker(
-        nodes_path, edges_path, min_date, max_date, normalizer
-    )
+    global_nodes = nodes
+    global_sailing_trajs = sailing_trajs
+    global_mmsis_in_frame = mmsis_in_frame
 
 
 def load_worker(nodes_path, edges_path, min_date, max_date, normalizer):
@@ -197,9 +197,9 @@ class TrajectoryDataset(Dataset):
         for points in norm_cols:
             nodes[points] = normalizer.normalize(nodes[points])
 
-        print("all traj:", len(nodes["traj_id"].unique()))
         sailing_trajs = nodes[nodes["sailing_vessel"]]["traj_id"].unique()
-        print("sailing traj:", len(sailing_trajs))
+
+        mmsis_in_frame = get_in_frame_dict(edges)
 
         """
         feat_cols_norm = {
@@ -237,7 +237,7 @@ class TrajectoryDataset(Dataset):
         with get_context("spawn").Pool(
             processes=num_workers,
             initializer=init_worker,
-            initargs=(nodes_path, edges_path, min_date, max_date, normalizer),
+            initargs=(nodes, sailing_trajs, mmsis_in_frame),
         ) as pool:
             all_results = list(
                 tqdm(

@@ -69,7 +69,7 @@ def train(
         edges_path,
         normalizer=normalizer,
         batch_size=batch_size,
-        num_workers=20,
+        num_workers=10,
         min_date="2022-03-15",
         max_date="2022-06-07",
     )
@@ -80,7 +80,7 @@ def train(
         edges_path,
         normalizer=normalizer,
         batch_size=batch_size,
-        num_workers=20,
+        num_workers=10,
         min_date="2022-06-08",
         max_date="2022-06-15",
     )
