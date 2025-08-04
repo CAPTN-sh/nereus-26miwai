@@ -148,6 +148,17 @@ def train(
                     obs_traj_rel, pred_traj_gt_rel, x_start, scene, seq_start_end
                 )
 
+            print("shapes")
+            print(y_pred_traj.shape, pred_traj_gt_rel.shape, mean.shape, log_var.shape)
+
+            def ensure_cat(x):
+                return torch.cat(x, dim=0) if isinstance(x, (list, tuple)) else x
+
+            y_pred_traj = ensure_cat(y_pred_traj)
+            pred_delta = ensure_cat(pred_delta)
+            mean = ensure_cat(mean)
+            log_var = ensure_cat(log_var)
+
             tloss, (l2l, kld, cel, rl) = total_loss(
                 y_pred_traj, pred_delta, pred_traj_gt_rel, mean, log_var
             )
