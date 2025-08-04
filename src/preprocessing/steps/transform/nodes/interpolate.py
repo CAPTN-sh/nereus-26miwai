@@ -69,7 +69,7 @@ def interpolate_df(
     y_obs = df[interp_cols].to_numpy()
 
     interpolator = PchipInterpolator(t_obs, y_obs)
-    t_grid, t_nearest_diff = _time_grid_and_proximity(t_obs)
+    t_grid, t_nearest_diff = _time_grid_and_proximity(t_obs, stepsize=5)
 
     if len(t_grid) < 2:
         return

@@ -10,8 +10,23 @@ class NodesPipeline(Pipeline):
         self.config = Config().get("transform_nodes")
 
     def load_tasks(self):
-        trajs_df = self._load_data("*_traj.parquet")
-        ships_df = self._load_data("ship_info*.parquet")
+
+        paths = Path(self.config["paths"]["in_folder"]).glob("*_traj.parquet")
+        valid_paths = []
+        for path in paths:
+            name = path.name
+            date_part = name.split("_")[0]
+            if "20220315" <= date_part <= "20220615":
+                valid_paths.append(path)
+        dfs = [pd.read_parquet(path, engine="pyarrow") for path in valid_paths]
+        trajs_df = pd.concat(dfs).reset_index(drop=True)
+
+        paths = Path(self.config["paths"]["in_folder"]).glob("ship_info*.parquet")
+        dfs = [pd.read_parquet(path, engine="pyarrow") for path in paths]
+        ships_df = pd.concat(dfs).reset_index(drop=True)
+
+        # trajs_df = self._load_data("*_traj.parquet")
+        # ships_df = self._load_data("ship_info*.parquet")
 
         task_count = trajs_df["mmsi"].nunique()
 
