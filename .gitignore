@@ -8,5 +8,6 @@ bin
 weights
 .history
 
+!scene_encoded.png
 !data/kiel/ais/2_decoded/ship_info.parquet
 !data/kiel/ais/2_decoded/ship_info_crawler.parquet
