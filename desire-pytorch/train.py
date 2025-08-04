@@ -71,7 +71,8 @@ def train(
         batch_size=batch_size,
         num_workers=10,
         min_date="2022-03-15",
-        max_date="2022-06-07",
+        max_date="2022-03-17",
+        # max_date="2022-06-07",
     )
     print("additional features:", train_dset.add_feats)
 
@@ -82,7 +83,8 @@ def train(
         batch_size=batch_size,
         num_workers=10,
         min_date="2022-06-08",
-        max_date="2022-06-15",
+        max_date="2022-06-09",
+        # max_date="2022-06-15",
     )
 
     gpu_id = get_freer_gpu()
