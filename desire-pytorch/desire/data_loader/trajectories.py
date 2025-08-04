@@ -15,11 +15,35 @@ global_sailing_trajs = None
 global_mmsis_in_frame = None
 
 
-def init_worker(nodes, sailing_trajs, mmsis_in_frame):
+def init_worker(nodes_path, edges_path, min_date, max_date, normalizer):
     global global_nodes, global_sailing_trajs, global_mmsis_in_frame
-    global_nodes = nodes
-    global_sailing_trajs = sailing_trajs
-    global_mmsis_in_frame = mmsis_in_frame
+    global_nodes, global_sailing_trajs, global_mmsis_in_frame = load_worker(
+        nodes_path, edges_path, min_date, max_date, normalizer
+    )
+
+
+def load_worker(nodes_path, edges_path, min_date, max_date, normalizer):
+    nodes = load_data(nodes_path, min_date, max_date)
+    edges = load_data(edges_path, min_date, max_date)
+
+    min_timestamp = nodes["timestamp"].astype(int).min()
+    nodes = add_time_col(nodes, min_timestamp)
+    edges = add_time_col(edges, min_timestamp)
+
+    nodes = nodes.sort_values(by=["timestamp", "traj_id"])
+    norm_cols = [
+        ["lat", "lon"],
+        ["origin_lat", "origin_lon"],
+        ["destination_lat", "destination_lon"],
+    ]
+    for points in norm_cols:
+        nodes[points] = normalizer.normalize(nodes[points])
+
+    sailing_trajs = nodes[nodes["sailing_vessel"]]["traj_id"].unique()
+    nodes = nodes[["time", "mmsi", "traj_id", "lat", "lon"]]
+    mmsis_in_frame = get_in_frame_dict(edges)
+
+    return nodes, sailing_trajs, mmsis_in_frame
 
 
 def seq_collate(data):
@@ -43,7 +67,7 @@ def seq_collate(data):
 
 
 def add_time_col(df, min_timestamp):
-    df["time"] = ((df["timestamp"].astype(int) - min_timestamp) / 1e10).astype(int)
+    df["time"] = ((df["timestamp"].astype(int) - min_timestamp) / 5e9).astype(int)
     return df
 
 
@@ -173,8 +197,11 @@ class TrajectoryDataset(Dataset):
         for points in norm_cols:
             nodes[points] = normalizer.normalize(nodes[points])
 
+        print("all traj:", len(nodes["traj_id"].unique()))
         sailing_trajs = nodes[nodes["sailing_vessel"]]["traj_id"].unique()
+        print("sailing traj:", len(sailing_trajs))
 
+        """
         feat_cols_norm = {
             "sailing_vessel": 1,
             "time_diff": 60,
@@ -194,9 +221,8 @@ class TrajectoryDataset(Dataset):
 
         for key, norm_val in feat_cols_norm.items():
             nodes[key] = nodes[key].astype(float) / norm_val
+        """
         self.add_feats = []
-
-        mmsis_in_frame = get_in_frame_dict(edges)
 
         min_cur_t = nodes["time"].min() + obs_len
         max_cur_t = nodes["time"].max() - pred_len
@@ -211,7 +237,7 @@ class TrajectoryDataset(Dataset):
         with get_context("spawn").Pool(
             processes=num_workers,
             initializer=init_worker,
-            initargs=(nodes, sailing_trajs, mmsis_in_frame),
+            initargs=(nodes_path, edges_path, min_date, max_date, normalizer),
         ) as pool:
             all_results = list(
                 tqdm(
