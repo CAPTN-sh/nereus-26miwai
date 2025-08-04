@@ -70,7 +70,7 @@ def train(
         normalizer=normalizer,
         batch_size=batch_size,
         num_workers=20,
-        max_date="2022-03-15",
+        min_date="2022-03-15",
         max_date="2022-06-07",
     )
     print("additional features:", train_dset.add_feats)
