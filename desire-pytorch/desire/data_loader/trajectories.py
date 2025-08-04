@@ -22,30 +22,6 @@ def init_worker(nodes, sailing_trajs, mmsis_in_frame):
     global_mmsis_in_frame = mmsis_in_frame
 
 
-def load_worker(nodes_path, edges_path, min_date, max_date, normalizer):
-    nodes = load_data(nodes_path, min_date, max_date)
-    edges = load_data(edges_path, min_date, max_date)
-
-    min_timestamp = nodes["timestamp"].astype(int).min()
-    nodes = add_time_col(nodes, min_timestamp)
-    edges = add_time_col(edges, min_timestamp)
-
-    nodes = nodes.sort_values(by=["timestamp", "traj_id"])
-    norm_cols = [
-        ["lat", "lon"],
-        ["origin_lat", "origin_lon"],
-        ["destination_lat", "destination_lon"],
-    ]
-    for points in norm_cols:
-        nodes[points] = normalizer.normalize(nodes[points])
-
-    sailing_trajs = nodes[nodes["sailing_vessel"]]["traj_id"].unique()
-    nodes = nodes[["time", "mmsi", "traj_id", "lat", "lon"]]
-    mmsis_in_frame = get_in_frame_dict(edges)
-
-    return nodes, sailing_trajs, mmsis_in_frame
-
-
 def seq_collate(data):
     (obs_seq_list, pred_seq_list, obs_seq_rel_list, pred_seq_rel_list) = zip(*data)
 
@@ -67,6 +43,7 @@ def seq_collate(data):
 
 
 def add_time_col(df, min_timestamp):
+    # TODO make it adjust to interpolation step size
     df["time"] = ((df["timestamp"].astype(int) - min_timestamp) / 5e9).astype(int)
     return df
 
@@ -99,7 +76,7 @@ def get_in_frame_dict(edges, max_dist=None):
 def extract_frames_worker(args):
     cur_t, t_range, obs_len, pred_len, max_vessels, feat_cols = args
 
-    nodes_t = global_nodes[global_nodes["time"].isin(t_range)]
+    nodes_t = global_nodes[global_nodes["time"].isin(t_range)].copy()
     full_traj_ids = nodes_t["traj_id"].unique()
 
     obs_range = t_range[:obs_len]
@@ -109,7 +86,7 @@ def extract_frames_worker(args):
     for traj_id in full_traj_ids:
         if traj_id in global_sailing_trajs:
             continue
-        cur_traj = nodes_t[nodes_t["traj_id"] == traj_id]
+        cur_traj = nodes_t[nodes_t["traj_id"] == traj_id].copy()
         if len(cur_traj) < len(t_range):
             continue
 
@@ -119,13 +96,9 @@ def extract_frames_worker(args):
         pred_traj_rel = []
 
         cur_mmsi = cur_traj["mmsi"].iloc[0]
-        mmsis = [cur_mmsi] + global_mmsis_in_frame.get((cur_t - 1, cur_mmsi), [])
+        mmsis = [cur_mmsi] + list(global_mmsis_in_frame.get((cur_t - 1, cur_mmsi), []))
         for mmsi in mmsis[:max_vessels]:
-            traj = nodes_t[nodes_t["mmsi"] == mmsi]
-            a = len(traj)
-            traj = traj.drop_duplicates(subset="time", keep="last")
-            if a != len(traj):
-                print(nodes_t[nodes_t["mmsi"] == mmsi])
+            traj = nodes_t[nodes_t["mmsi"] == mmsi][["time", "lat", "lon"] + feat_cols]
             if len(traj) < len(t_range) / 2:
                 continue
             traj = traj.set_index("time").reindex(t_range)

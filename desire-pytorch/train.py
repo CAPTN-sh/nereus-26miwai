@@ -148,8 +148,9 @@ def train(
             final_loss = torch.zeros(num_batches)
             for i, (s, e) in enumerate(seq_start_end):
                 s = s.item()
-                e = e.item()
-                l = tloss[s:e].sum()
+                # e = e.item()
+                # l = tloss[s:e].sum()
+                l = tloss[s]
                 final_loss[i] = l
             final_loss = final_loss.sum()
             final_loss.backward()
