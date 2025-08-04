@@ -121,6 +121,7 @@ def train(
 
     for epoch in range(num_epochs):
         sum_loss = 0
+        num_batches_total = 0
         for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch}")):
             # logging.info("epoch {} :batch_idx {}, ".format(epoch, batch_idx))
             optimizer.zero_grad()
@@ -157,8 +158,10 @@ def train(
             torch.nn.utils.clip_grad_norm_(desire.parameters(), norm_clip_value)
             optimizer.step()
 
-            sum_loss += tloss.mean().item()
-        loss_str = str(sum_loss / iterations_per_epoch)
+            sum_loss += final_loss.item() / num_batches
+            num_batches_total += 1
+
+        loss_str = str(sum_loss / num_batches_total)
 
         logging.info("Total loss {}; epoch = {}".format(loss_str, epoch))
         logging.info(
@@ -210,33 +213,34 @@ def evaluate(epoch, desire, eval_loader, device, scene, normalizer):
         tloss, (l2l, kld, cel, rl) = total_loss(
             y_pred_traj, pred_delta, pred_traj_gt_rel, mean, log_var
         )
-
-        total_loss_val += tloss.mean().item()
-        total_l2l += l2l.item()
-        total_kld += kld.item()
-        total_cel += cel.item()
-        total_rl += rl.item()
+        num_batches = seq_start_end.size(0)
+        final_loss = torch.zeros(num_batches)
+        for i, (s, e) in enumerate(seq_start_end):
+            s = s.item()
+            final_loss[i] = tloss[s]
+        total_loss_val += final_loss.sum().item() / num_batches
         num_batches_total += 1
 
     avg_loss = total_loss_val / num_batches_total
-    avg_l2l = total_l2l / num_batches_total
-    avg_kld = total_kld / num_batches_total
-    avg_cel = total_cel / num_batches_total
-    avg_rl = total_rl / num_batches_total
 
     logger.info(f"[Eval] Avg Loss: {avg_loss:.4f}")
-    logger.info(
-        f"[Eval] L2L: {avg_l2l:.4f}, KLD: {avg_kld:.4f}, CEL: {avg_cel:.4f}, RL: {avg_rl:.4f}"
-    )
 
-    plot_traj(epoch, avg_loss, obs_traj, pred_traj_gt, y_pred_traj, normalizer)
+    plot_traj(
+        epoch, avg_loss, obs_traj, pred_traj_gt, y_pred_traj, seq_start_end, normalizer
+    )
 
     desire.train()  # restore training mode afterward
     return avg_loss
 
 
 def plot_traj(
-    epoch, loss, obs_traj, pred_traj_gt, y_pred_traj, normalizer: TorchNormalizer
+    epoch,
+    loss,
+    obs_traj,
+    pred_traj_gt,
+    y_pred_traj,
+    seq_start_end,
+    normalizer: TorchNormalizer,
 ):
     fig, ax = plt.subplots(figsize=(10, 10))
 
@@ -247,17 +251,19 @@ def plot_traj(
     start_abs = obs_traj[:, :, -1].unsqueeze(2)
     y_pred_abs = start_abs + y_pred_traj.cumsum(dim=2)
 
-    def plot_trajectories(ax, traj, color):
-        for i in range(min(5, traj.shape[0])):
-            traj_i = traj[i].detach().permute(1, 0)
-            traj_i = normalizer.denormalize(traj_i).cpu()
-            xs = traj_i[:, 1].numpy()
-            ys = traj_i[:, 0].numpy()
-            ax.scatter(xs, ys, color=color, alpha=0.4, s=2)
+    def plot_trajectories(ax, traj, i, color):
+        traj_i = traj[i].detach().permute(1, 0)
+        traj_i = normalizer.denormalize(traj_i).cpu()
+        xs = traj_i[:, 1].numpy()
+        ys = traj_i[:, 0].numpy()
+        ax.scatter(xs, ys, color=color, alpha=0.4, s=2)
 
-    plot_trajectories(ax, obs_traj, color="blue")
-    plot_trajectories(ax, pred_traj_gt, color="green")
-    plot_trajectories(ax, y_pred_abs, color="red")
+    for i, (s, e) in enumerate(seq_start_end):
+        if i > 5:
+            break
+        plot_trajectories(ax, obs_traj, s, color="blue")
+        plot_trajectories(ax, pred_traj_gt, s, color="green")
+        plot_trajectories(ax, y_pred_abs, s, color="red")
 
     legend_elements = [
         Line2D([0], [0], color="blue", label="Observed"),
