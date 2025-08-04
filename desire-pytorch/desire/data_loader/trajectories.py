@@ -1,7 +1,7 @@
 import logging
 import pandas as pd
 import numpy as np
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, cpu_count, get_context
 
 import torch
 from torch.utils.data import Dataset
@@ -98,6 +98,10 @@ def extract_frames_worker(args):
         mmsis = [cur_mmsi] + global_mmsis_in_frame.get((cur_t - 1, cur_mmsi), [])
         for mmsi in mmsis[:max_vessels]:
             traj = nodes_t[nodes_t["mmsi"] == mmsi]
+            a = len(traj)
+            traj = traj.drop_duplicates(subset="time", keep="last")
+            if a != len(traj):
+                print(nodes_t[nodes_t["mmsi"] == mmsi])
             if len(traj) < len(t_range) / 2:
                 continue
             traj = traj.set_index("time").reindex(t_range)
@@ -204,7 +208,7 @@ class TrajectoryDataset(Dataset):
                 (cur_t, t_range, obs_len, pred_len, max_vessels, self.add_feats)
             )
 
-        with Pool(
+        with get_context("spawn").Pool(
             processes=num_workers,
             initializer=init_worker,
             initargs=(nodes, sailing_trajs, mmsis_in_frame),
