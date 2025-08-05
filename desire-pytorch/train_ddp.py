@@ -37,10 +37,10 @@ def train_worker(
     rank,
     world_size,
     local_rank,
-    batch_size=8192,
+    batch_size=2048,
     num_epochs=30,
     norm_clip_value=1.0,
-    lr=5e-3,
+    lr=1e-4,
 ):
     ### --- Step 1: DDP Setup --- ###
     dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
@@ -119,10 +119,10 @@ def train_worker(
             pred_traj_gt_rel = pred_traj_gt_rel.permute(1, 2, 0)
 
             x_start = obs_traj[:, :, 0].to(device)
-            with amp.autocast(device_type="cuda"):
-                y_pred_traj, pred_delta, mean, log_var = desire(
-                    obs_traj_rel, pred_traj_gt_rel, x_start, scene, seq_start_end
-                )
+            # with amp.autocast(device_type="cuda"):
+            y_pred_traj, pred_delta, mean, log_var = desire(
+                obs_traj_rel, pred_traj_gt_rel, x_start, scene, seq_start_end
+            )
 
             tloss, (l2l, kld, cel, rl) = total_loss(
                 y_pred_traj, pred_delta, pred_traj_gt_rel, mean, log_var
@@ -131,16 +131,22 @@ def train_worker(
             final_loss = torch.zeros(num_batches, device=device)
             for i, (s, e) in enumerate(seq_start_end):
                 s = s.item()
-                # e = e.item()
-                # l = tloss[s:e].sum()
-                l = tloss[s]
+                e = e.item()
+                l = tloss[s:e].sum()
+                # l = tloss[s]
                 final_loss[i] = l
             final_loss = final_loss.sum()
 
+            final_loss.backward()
+            torch.nn.utils.clip_grad_norm_(desire.parameters(), norm_clip_value)
+            optimizer.step()
+
+            """
             scaler.scale(final_loss).backward()
             torch.nn.utils.clip_grad_norm_(desire.parameters(), norm_clip_value)
             scaler.step(optimizer)
             scaler.update()
+            """
 
             sum_loss += final_loss.item() / num_batches
             num_batches_total += 1
