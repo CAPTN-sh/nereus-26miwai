@@ -90,7 +90,7 @@ def train_worker(
     normalizer = normalizer.to_TorchNormalizer().to(device)
 
     desire = DESIRE(IOCParams(), sgm_params, normalizer).to(device)
-    desire = DDP(desire, device_ids=[rank])
+    desire = DDP(desire, device_ids=[rank], find_unused_parameters=True)
 
     image = Image.open(path_of_static_image)
     scene = TF.to_tensor(image)
@@ -122,12 +122,6 @@ def train_worker(
             with amp.autocast(device_type="cuda"):
                 y_pred_traj, pred_delta, mean, log_var = desire(
                     obs_traj_rel, pred_traj_gt_rel, x_start, scene, seq_start_end
-                )
-
-            if rank == 0:
-                print("shapes")
-                print(
-                    y_pred_traj.shape, pred_traj_gt_rel.shape, mean.shape, log_var.shape
                 )
 
             tloss, (l2l, kld, cel, rl) = total_loss(
