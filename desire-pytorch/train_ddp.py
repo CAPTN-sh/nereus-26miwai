@@ -21,6 +21,7 @@ import re
 from tqdm import tqdm
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
+import argparse
 
 
 from PIL import Image
@@ -35,8 +36,6 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 def train_worker(
     rank,
     world_size,
-    normalizer,
-    path_of_static_image,
     batch_size=8192,
     num_epochs=30,
     norm_clip_value=1.0,
@@ -49,6 +48,13 @@ def train_worker(
     print(f"[Rank {rank}] Starting training on {device}")
 
     ### --- Step 2: DataLoader --- ###
+
+    nodes_path = Path("/home/bbiesenbach/data/kiel/ais/3_features/nodes.parquet")
+    edges_path = Path("/home/bbiesenbach/data/kiel/ais/3_features/edges.parquet")
+    path_of_static_image = Path("scene_encoded.png").resolve()
+
+    normalizer = CoordsNormalizer()
+    normalizer.load_from_file(Path("normalization_stats.npy").resolve())
 
     train_dset = LazyTrajectoryDataset(
         nodes_path,
@@ -159,22 +165,12 @@ def train_worker(
 
 
 if __name__ == "__main__":
-    nodes_path = Path("/home/bbiesenbach/data/kiel/ais/3_features/nodes.parquet")
-    edges_path = Path("/home/bbiesenbach/data/kiel/ais/3_features/edges.parquet")
 
-    # nodes_path = Path("data/kiel/ais/3_features/nodes.parquet").resolve()
-    # edges_path = Path("data/kiel/ais/3_features/edges.parquet").resolve()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--local_rank", type=int)
+    args = parser.parse_args()
 
-    path_of_static_image = Path("scene_encoded.png").resolve()
-
-    normalizer = CoordsNormalizer()
-    normalizer.load_from_file(Path("normalization_stats.npy").resolve())
-
+    rank = args.local_rank
     world_size = torch.cuda.device_count()
 
-    mp.spawn(
-        train_worker,
-        args=(world_size, normalizer, path_of_static_image),
-        nprocs=world_size,
-        join=True,
-    )
+    train_worker(rank, world_size)
