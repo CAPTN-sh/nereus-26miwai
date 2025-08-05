@@ -36,6 +36,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 def train_worker(
     rank,
     world_size,
+    local_rank,
     batch_size=8192,
     num_epochs=30,
     norm_clip_value=1.0,
@@ -43,8 +44,8 @@ def train_worker(
 ):
     ### --- Step 1: DDP Setup --- ###
     dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
-    torch.cuda.set_device(rank)
-    device = torch.device(f"cuda:{rank}")
+    torch.cuda.set_device(local_rank)
+    device = torch.device(f"cuda:{local_rank}")
     print(f"[Rank {rank}] Starting training on {device}")
 
     ### --- Step 2: DataLoader --- ###
@@ -164,13 +165,13 @@ def train_worker(
     # TODO Ensure evaluation, plotting, and checkpointing only happen on rank 0
 
 
+def get_distributed_args():
+    rank = int(os.environ["RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+    local_rank = int(os.environ["LOCAL_RANK"])
+    return rank, world_size, local_rank
+
+
 if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--local_rank", type=int)
-    args = parser.parse_args()
-
-    rank = args.local_rank
-    world_size = torch.cuda.device_count()
-
-    train_worker(rank, world_size)
+    rank, world_size, local_rank = get_distributed_args()
+    train_worker(rank, world_size, local_rank)
