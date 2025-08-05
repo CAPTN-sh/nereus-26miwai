@@ -75,7 +75,6 @@ def get_in_frame_dict(edges, max_dist=None):
 
 def add_filled_gap_steps(df: pd.DataFrame, steps: int):
     df = df.sort_values(by="time").reset_index(drop=True)
-    original_cols = df.columns
 
     new_rows = []
     times = df["time"].values
@@ -215,7 +214,7 @@ class LazyTrajectoryDataset(Dataset):
 
         self.data = {}
         for mmsi, group in tqdm(nodes.groupby("mmsi")):
-            df = add_filled_gap_steps(group, pred_len)
+            df = add_filled_gap_steps(group, obs_len + pred_len)
             df = add_rel_latlon(df)
             df = df.set_index("time").sort_index()
             self.data[mmsi] = df
