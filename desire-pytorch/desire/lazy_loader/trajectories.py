@@ -196,7 +196,7 @@ class LazyTrajectoryDataset(Dataset):
             nodes[latlon] = normalizer.normalize(nodes[latlon])
 
         self.feature_cols = sum(feat_cols_to_norm, []) + list(feat_cols.keys())
-        nodes = nodes[["time", "mmsi", "traj_id"] + self.feature_cols]
+        nodes = nodes[["time", "mmsi", "traj_id", "lat", "lon"] + self.feature_cols]
 
         for key, norm_val in feat_cols.items():
             nodes[key] = nodes[key].astype(float) / norm_val
