@@ -44,7 +44,7 @@ def seq_collate(data):
 
 def add_time_col(df, min_timestamp):
     # TODO make it adjust to interpolation step size
-    df["time"] = ((df["timestamp"].astype(int) - min_timestamp) / 5e9).astype(int)
+    df["time"] = ((df["timestamp"].astype(int) - min_timestamp) / 10e9).astype(int)
     return df
 
 
@@ -99,7 +99,7 @@ def extract_frames_worker(args):
         mmsis = [cur_mmsi] + list(global_mmsis_in_frame.get((cur_t - 1, cur_mmsi), []))
         for mmsi in mmsis[:max_vessels]:
             traj = nodes_t[nodes_t["mmsi"] == mmsi][["time", "lat", "lon"] + feat_cols]
-            if len(traj) < len(t_range) / 2:
+            if len(traj) < pred_len:
                 continue
             traj = traj.set_index("time").reindex(t_range)
             traj = traj.ffill().bfill().reset_index()
@@ -134,6 +134,7 @@ class TrajectoryDataset(Dataset):
         obs_len=8,
         pred_len=12,
         max_vessels=10,
+        exclude_ship_types=list(range(0, 40)),
         min_date=None,
         max_date=None,
         num_workers=8,
@@ -170,7 +171,9 @@ class TrajectoryDataset(Dataset):
         for points in norm_cols:
             nodes[points] = normalizer.normalize(nodes[points])
 
-        sailing_trajs = nodes[nodes["sailing_vessel"]]["traj_id"].unique()
+        sailing_trajs = nodes[nodes["ship_type"].isin(exclude_ship_types)][
+            "traj_id"
+        ].unique()
 
         mmsis_in_frame = get_in_frame_dict(edges)
 
