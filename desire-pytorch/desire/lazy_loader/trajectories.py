@@ -100,6 +100,20 @@ def add_filled_gap_steps(df: pd.DataFrame, steps: int):
                 row["time"] = next_time - j
                 new_rows.append(row)
 
+    # Fill after all
+    current_time = times[-1]
+    for j in range(1, steps + 1):
+        row = df.iloc[-1].copy()
+        row["time"] = current_time + j
+        new_rows.append(row)
+
+    # Fill before next_time
+    current_time = times[0]
+    for j in range(steps, 0, -1):
+        row = df.iloc[0].copy()
+        row["time"] = current_time - j
+        new_rows.append(row)
+
     # Combine original and new
     df_extra = pd.DataFrame(new_rows)
     combined = pd.concat([df, df_extra], ignore_index=True)
@@ -214,7 +228,7 @@ class LazyTrajectoryDataset(Dataset):
 
         self.data = {}
         for mmsi, group in tqdm(nodes.groupby("mmsi")):
-            df = add_filled_gap_steps(group, obs_len + pred_len)
+            df = add_filled_gap_steps(group, pred_len)
             df = add_rel_latlon(df)
             df = df.set_index("time").sort_index()
             self.data[mmsi] = df
