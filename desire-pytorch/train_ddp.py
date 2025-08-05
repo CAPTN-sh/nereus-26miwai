@@ -86,7 +86,7 @@ def train_worker(
     ### --- Step 3: Model --- ###
 
     sgm_params = SGMParams()
-    sgm_params.rnn_enc_x_params.input_size = len(train_dset.feature_cols)
+    sgm_params.rnn_enc_x_params.input_size = 2 + len(train_dset.feature_cols)
     normalizer = normalizer.to_TorchNormalizer().to(device)
 
     desire = DESIRE(IOCParams(), sgm_params, normalizer).to(device)

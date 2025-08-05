@@ -192,12 +192,10 @@ class LazyTrajectoryDataset(Dataset):
         edges = add_time_col(edges, min_timestamp)
         mmsis_in_frame = get_in_frame_dict(edges)
 
-        self.feature_cols = []
         for latlon in [["lat", "lon"]] + feat_cols_to_norm:
             nodes[latlon] = normalizer.normalize(nodes[latlon])
-            self.feature_cols += latlon
 
-        self.feature_cols += list(feat_cols.keys())
+        self.feature_cols = sum(feat_cols_to_norm, []) + list(feat_cols.keys())
         nodes = nodes[["time", "mmsi", "traj_id"] + self.feature_cols]
 
         for key, norm_val in feat_cols.items():
