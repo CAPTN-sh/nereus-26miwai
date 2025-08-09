@@ -78,3 +78,9 @@ package-dir = { "" = "src" } # Specify for setuptools that all my Python package
 [tool.setuptools.packages.find] # Configures how setuptools discovers the Python packages (i.e. directories containing __init__.py files).
 where = ["src"] # Specify for the setup tool to look for packages in the src/ directory.
 include = ["*"] # Include all packages found in the src/ directory.
+
+[tool.ruff]
+src = ["src", "."]
+
+[tool.ruff.lint.isort]
+known-first-party = ["desire", "plot"]

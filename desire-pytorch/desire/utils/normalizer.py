@@ -10,6 +10,11 @@ class TorchCoordsNormalizer(nn.Module):
 
     def __init__(self, mean, std):
         super().__init__()
+        mean = np.asarray(mean, dtype=np.float32).reshape(-1)
+        std = np.asarray(std, dtype=np.float32).reshape(-1)
+
+        std[std == 0] = 1e-8
+
         self.register_buffer("mean", torch.tensor(mean, dtype=torch.float32))
         self.register_buffer("std", torch.tensor(std, dtype=torch.float32))
 

@@ -1,28 +1,40 @@
+from pathlib import Path
+
+import pandas as pd
+from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
-from desire.lazy_loader.trajectories import TrajectoryDataset, seq_collate
+
+from desire.lazy_loader.trajectories import LazyTrajectoryDataset, seq_collate
 
 
-def lazy_loader(dset, rank, batch_size=20, num_workers=8):
-    """
-    dset = TrajectoryDataset(
-        nodes_path,
-        edges_path,
-        normalizer,
-        obs_len=obs_len,
-        pred_len=pred_len,
-        max_vessels=max_vessels,
+def lazy_loader(
+    data_folder: Path,
+    min_date: pd.Timestamp,
+    max_date: pd.Timestamp,
+    world_size: int,
+    rank: int,
+    batch_size: int,
+    feat_cols=[],
+):
+
+    dset = LazyTrajectoryDataset(
+        nodes_path=data_folder / "nodes.parquet",
+        edges_path=data_folder / "edges.parquet",
+        normalizer_path=data_folder / "normalization_stats.npy",
         min_date=min_date,
         max_date=max_date,
-        num_workers=num_workers,
+        feat_cols=feat_cols,
     )
-    """
 
-    loader = DistributedSampler(
-        dset=dset,
-        rank=rank,
+    sampler = DistributedSampler(dset, num_replicas=world_size, rank=rank, shuffle=True)
+
+    loader = DataLoader(
+        dset,
         batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
+        sampler=sampler,
+        num_workers=8,
         collate_fn=seq_collate,
+        pin_memory=True,
+        drop_last=True,
     )
-    return dset, loader
+    return dset, sampler, loader

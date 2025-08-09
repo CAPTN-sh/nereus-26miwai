@@ -19,7 +19,7 @@ def get_scene(scene, ypred, scene_size, normalizer: TorchCoordsNormalizer):
     lat_min, lat_max = 54.31, 54.46
     lon_min, lon_max = 10.13, 10.32
 
-    lat, lon = normalizer.denormalize(ypred).T
+    lat, lon = normalizer.denormalize_coords(ypred).T
 
     x_px = (((lon - lon_min) / (lon_max - lon_min)) * width).long()
     y_px = (((lat_max - lat) / (lat_max - lat_min)) * height).long()

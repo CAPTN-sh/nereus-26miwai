@@ -1,26 +1,15 @@
 import logging
-import pandas as pd
-import numpy as np
-from multiprocessing import Pool, cpu_count, get_context
+from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
+
 from desire.utils.normalizer import Normalizer
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
-global_nodes = None
-global_sailing_trajs = None
-global_mmsis_in_frame = None
-
-
-def init_worker(nodes, sailing_trajs, mmsis_in_frame):
-    global global_nodes, global_sailing_trajs, global_mmsis_in_frame
-    global_nodes = nodes
-    global_sailing_trajs = sailing_trajs
-    global_mmsis_in_frame = mmsis_in_frame
 
 
 def seq_collate(data):
@@ -50,15 +39,10 @@ def get_interp_step_size(df: pd.DataFrame):
     return step_size
 
 
-def process_time(df: pd.DataFrame, min_date, max_date, step_size) -> pd.DataFrame:
-    if max_date is not None:
-        max_date = pd.to_datetime(max_date) + pd.Timedelta(days=1)
-        df = df[df["timestamp"] < max_date]
-    if min_date is not None:
-        min_date = pd.to_datetime(min_date)
-        df = df[df["timestamp"] >= min_date]
-    df.copy().reset_index(drop=True)
-
+def process_time(
+    df: pd.DataFrame, min_date: pd.Timestamp, max_date: pd.Timestamp, step_size: int
+) -> pd.DataFrame:
+    df = df[df["timestamp"].between(min_date, max_date)].copy().reset_index(drop=True)
     df["time"] = df["timestamp"].astype("datetime64[s]").astype("int64") // step_size
     df = df.set_index("time").sort_index()
     return df
@@ -156,13 +140,13 @@ class LazyTrajectoryDataset(Dataset):
         nodes_path: Path,
         edges_path: Path,
         normalizer_path: Path,
+        min_date: pd.Timestamp,
+        max_date: pd.Timestamp,
         feat_cols=[],
         obs_len=8,
         pred_len=12,
         max_vessels=10,
         exclude_ship_types=list(range(0, 40)),
-        min_date=None,
-        max_date=None,
         num_workers=8,
     ):
         """
@@ -195,6 +179,9 @@ class LazyTrajectoryDataset(Dataset):
         step_size = get_interp_step_size(nodes)
         nodes = process_time(nodes, min_date, max_date, step_size)
 
+        if nodes.empty:
+            raise ValueError("There are no values within the given time range.")
+
         for col in norm_cols:
             norm_by = "lat" if "lat" in col else "lon" if "lon" in col else col
             nodes[col] = self.normalizer.normalize(nodes[col].astype(float), norm_by)
@@ -211,7 +198,9 @@ class LazyTrajectoryDataset(Dataset):
         mmsis_in_frame = get_in_frame_dict(edges)
 
         for cur_t in tqdm(range(nodes.index[0], nodes.index[-1])):
-            self.add_items_at_t(nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_vessels)
+            self._add_items_at_t(
+                nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_vessels
+            )
 
         self.data = {}
         for mmsi, group in tqdm(nodes.groupby("mmsi")):
@@ -219,7 +208,7 @@ class LazyTrajectoryDataset(Dataset):
             df = add_rel_latlon(df)
             self.data[mmsi] = df
 
-    def add_items_at_t(self, nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_vessels):
+    def _add_items_at_t(self, nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_vessels):
         nodes_t = nodes.loc[cur_t - self.obs_len : cur_t + self.pred_len - 1]
         if nodes_t.empty:
             return
@@ -262,10 +251,12 @@ class LazyTrajectoryDataset(Dataset):
             pred_abs.append(pred_traj[["lat", "lon"]].values)
             pred_rel.append(pred_traj[["rel_lat", "rel_lon"]].values)
 
-        # Transpose and convert to tensor
-        obs_abs = torch.tensor(np.stack(obs_abs, axis=0)).permute(0, 2, 1).float()
-        obs_rel = torch.tensor(np.stack(obs_rel, axis=0)).permute(0, 2, 1).float()
-        pred_abs = torch.tensor(np.stack(pred_abs, axis=0)).permute(0, 2, 1).float()
-        pred_rel = torch.tensor(np.stack(pred_rel, axis=0)).permute(0, 2, 1).float()
+        obs_abs = self._to_tensor(obs_abs)
+        obs_rel = self._to_tensor(obs_rel)
+        pred_abs = self._to_tensor(pred_abs)
+        pred_rel = self._to_tensor(pred_rel)
 
         return obs_abs, pred_abs, obs_rel, pred_rel
+
+    def _to_tensor(traj):
+        return torch.tensor(np.stack(traj, axis=0)).permute(0, 2, 1).float()

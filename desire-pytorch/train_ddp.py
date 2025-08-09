@@ -1,25 +1,31 @@
+import logging
 import os
 from pathlib import Path
+
+import pandas as pd
 import torch
-import torch.optim as optim
-from desire.lazy_loader.trajectories import LazyTrajectoryDataset, seq_collate
-from desire.models import DESIRE
-from desire.utils.params import IOCParams, SGMParams
-from desire.nn.loss import *
-from tqdm import tqdm
-from torch.utils.data.distributed import DistributedSampler
-from torch.utils.data import DataLoader
-from PIL import Image
-import torchvision.transforms.functional as TF
-from torch import amp
 import torch.distributed as dist
+import torch.nn as nn
+import torch.optim as optim
+import torchvision.transforms.functional as TF
+from PIL import Image
+from torch import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
+from tqdm import tqdm
+
+from desire.lazy_loader.loader import lazy_loader
+from desire.models import DESIRE
+from desire.nn.loss import total_loss
+from desire.utils.params import IOCParams, SGMParams
+from plot import plot_traj
 
 
 def train_worker(
     rank,
     world_size,
     local_rank,
+    data_folder,
+    scene_path,
     batch_size=2048,
     num_epochs=30,
     norm_clip_value=1.0,
@@ -32,32 +38,22 @@ def train_worker(
     print(f"[Rank {rank}] Starting training on {device}")
 
     ### --- Step 2: DataLoader --- ###
-
-    nodes_path = Path("/home/bbiesenbach/data/kiel/ais/3_features/nodes.parquet")
-    edges_path = Path("/home/bbiesenbach/data/kiel/ais/3_features/edges.parquet")
-    normalizer_path = Path("normalization_stats.npy").resolve()
-    path_of_static_image = Path("scene_encoded.png").resolve()
-
-    train_dset = LazyTrajectoryDataset(
-        nodes_path,
-        edges_path,
-        normalizer_path,
-        min_date="2022-04-15",
-        max_date="2022-04-15",
-    )
-
-    train_sampler = DistributedSampler(
-        train_dset, num_replicas=world_size, rank=rank, shuffle=True
-    )
-
-    train_loader = DataLoader(
-        train_dset,
+    train_dset, train_sampler, train_loader = lazy_loader(
+        data_folder=data_folder,
+        min_date=pd.Timestamp("2022-04-15"),
+        max_date=pd.Timestamp("2022-04-20"),
+        world_size=world_size,
+        rank=rank,
         batch_size=batch_size,
-        sampler=train_sampler,
-        num_workers=10,
-        collate_fn=seq_collate,
-        pin_memory=True,
-        drop_last=True,
+    )
+
+    eval_dset, eval_sampler, eval_loader = lazy_loader(
+        data_folder=data_folder,
+        min_date=pd.Timestamp("2022-04-21"),
+        max_date=pd.Timestamp("2022-04-21"),
+        world_size=world_size,
+        rank=rank,
+        batch_size=batch_size,
     )
 
     if rank == 0:
@@ -73,19 +69,18 @@ def train_worker(
     desire = DESIRE(IOCParams(), sgm_params, normalizer).to(device)
     desire = DDP(desire, device_ids=[rank], find_unused_parameters=True)
 
-    image = Image.open(path_of_static_image)
+    image = Image.open(scene_path)
     scene = TF.to_tensor(image)
     scene.unsqueeze_(0)
     scene = scene.to(device)
 
     optimizer = optim.Adam(desire.parameters(), lr=lr)
-    scaler = amp.GradScaler()
+    #scaler = amp.GradScaler()
 
     for epoch in range(num_epochs):
         sum_loss = 0
         num_batches_total = 0
         train_sampler.set_epoch(epoch)
-
         for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch}")):
             optimizer.zero_grad()
 
@@ -113,13 +108,11 @@ def train_worker(
             for i, (s, e) in enumerate(seq_start_end):
                 s = s.item()
                 e = e.item()
-                l = tloss[s:e].sum()
-                # l = tloss[s]
-                final_loss[i] = l
+                final_loss[i] = tloss[s:e].sum()
             final_loss = final_loss.sum()
 
             final_loss.backward()
-            torch.nn.utils.clip_grad_norm_(desire.parameters(), norm_clip_value)
+            nn.utils.clip_grad_norm_(desire.parameters(), norm_clip_value)
             optimizer.step()
 
             """
@@ -142,8 +135,52 @@ def train_worker(
                 )
             )
 
+            if epoch % 1 == 0:
+                eval(epoch, desire, eval_loader, device, scene, normalizer)
+
     dist.destroy_process_group()
-    # TODO Ensure evaluation, plotting, and checkpointing only happen on rank 0
+
+def eval(epoch, desire, eval_loader, device, scene, normalizer):
+    desire.eval()
+
+    total_loss_val = 0
+    num_batches_total = 0
+
+    for batch in tqdm(eval_loader, desc="Evaluating"):
+        obs_traj, pred_traj_gt, obs_traj_rel, pred_traj_gt_rel, seq_start_end = [
+            tensor.to(device) for tensor in batch
+        ]
+
+        obs_traj = obs_traj.permute(1, 2, 0)
+        pred_traj_gt = pred_traj_gt.permute(1, 2, 0)
+        obs_traj_rel = obs_traj_rel.permute(1, 2, 0)
+        pred_traj_gt_rel = pred_traj_gt_rel.permute(1, 2, 0)
+
+        x_start = obs_traj[:, :, 0]
+        #with amp.autocast(device_type="cuda"):
+        y_pred_traj, pred_delta, mean, log_var = desire(
+            obs_traj_rel, pred_traj_gt_rel, x_start, scene, seq_start_end
+        )
+
+        tloss, (l2l, kld, cel, rl) = nn.loss.total_loss(
+            y_pred_traj, pred_delta, pred_traj_gt_rel, mean, log_var
+        )
+        num_batches = seq_start_end.size(0)
+        final_loss = torch.zeros(num_batches)
+        for i, (s, e) in enumerate(seq_start_end):
+            s = s.item()
+            final_loss[i] = tloss[s]
+        total_loss_val += final_loss.sum().item() / num_batches
+        num_batches_total += 1
+
+    avg_loss = total_loss_val / num_batches_total
+
+    print(f"[Eval] Avg Loss: {avg_loss:.4f}")
+
+    plot_traj(epoch, obs_traj, pred_traj_gt, y_pred_traj, seq_start_end, normalizer)
+
+    desire.train()
+    return avg_loss
 
 
 def get_distributed_args():
@@ -155,4 +192,6 @@ def get_distributed_args():
 
 if __name__ == "__main__":
     rank, world_size, local_rank = get_distributed_args()
-    train_worker(rank, world_size, local_rank)
+    data_folder = Path("/home/bbiesenbach/data/kiel/ais/3_features")
+    scene_path = Path("scene_encoded.png").resolve()
+    train_worker(rank, world_size, local_rank, data_folder, scene_path)
