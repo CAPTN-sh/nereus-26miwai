@@ -4,11 +4,11 @@ from desire.utils import SCFParams
 from desire.nn import SocialPool
 from desire.utils import SocialPoolingParams, get_scene, get_fc_act, SCFParams
 import numpy as np
-from desire.utils.normalizer import TorchNormalizer
+from desire.utils.normalizer import TorchCoordsNormalizer
 
 
 class SCF(nn.Module):
-    def __init__(self, index, params: SCFParams, normalizer: TorchNormalizer):
+    def __init__(self, index, params: SCFParams, normalizer: TorchCoordsNormalizer):
         super(SCF, self).__init__()
         self.params = params
         self.index = index

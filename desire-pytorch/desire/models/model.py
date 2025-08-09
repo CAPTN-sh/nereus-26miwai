@@ -1,7 +1,7 @@
 from desire.models.IOC import IOC
 from desire.models.SGM import SGM
 from desire.utils import IOCParams, SGMParams
-from desire.utils.normalizer import TorchNormalizer
+from desire.utils.normalizer import TorchCoordsNormalizer
 
 import torch
 import torch.nn as nn
@@ -10,7 +10,10 @@ import torch.nn as nn
 class DESIRE(nn.Module):
 
     def __init__(
-        self, ioc_params: IOCParams, sgm_params: SGMParams, normalizer: TorchNormalizer
+        self,
+        ioc_params: IOCParams,
+        sgm_params: SGMParams,
+        normalizer: TorchCoordsNormalizer,
     ):
         super(DESIRE, self).__init__()
 

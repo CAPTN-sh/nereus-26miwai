@@ -1,8 +1,8 @@
 import torch
-from desire.utils.normalizer import TorchNormalizer
+from desire.utils.normalizer import TorchCoordsNormalizer
 
 
-def get_scene(scene, ypred, scene_size, normalizer: TorchNormalizer):
+def get_scene(scene, ypred, scene_size, normalizer: TorchCoordsNormalizer):
     """get_scene
     input
     =====

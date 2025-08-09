@@ -1,9 +1,10 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from typing import Dict
 
 
-class TorchNormalizer(nn.Module):
+class TorchCoordsNormalizer(nn.Module):
     mean: torch.Tensor
     std: torch.Tensor
 
@@ -12,36 +13,39 @@ class TorchNormalizer(nn.Module):
         self.register_buffer("mean", torch.tensor(mean, dtype=torch.float32))
         self.register_buffer("std", torch.tensor(std, dtype=torch.float32))
 
-    def normalize(self, coords):
+    def normalize_coords(self, coords):
         return (coords - self.mean) / self.std
 
-    def denormalize(self, coords_norm):
+    def denormalize_coords(self, coords_norm):
         return coords_norm * self.std + self.mean
 
 
-class CoordsNormalizer:
-    def __init__(self, mean=None, std=None):
-        self.mean = np.array(mean)
-        self.std = np.array(std)
+class Normalizer:
+    def __init__(self):
+        self.stats: Dict[str, Dict[str, np.ndarray]] = {}
 
-    def approximate(self, df):
-        self.mean = np.array(df[["lat", "lon"]].mean())
-        self.std = np.array(df[["lat", "lon"]].std())
+    def approximate_from_df(self, df, columns):
+        for column in columns:
+            self.stats[column] = {
+                "mean": np.array(df[column].mean()),
+                "std": np.array(df[column].std()),
+                "min": np.array(df[column].min()),
+                "max": np.array(df[column].max()),
+            }
 
     def load_from_file(self, path):
-        norm_stats = np.load(path, allow_pickle=True).item()
-        self.mean = norm_stats["mean"]
-        self.std = norm_stats["std"]
+        self.stats = np.load(path, allow_pickle=True).item()
 
     def save_to_file(self, path):
-        norm_stats = {"mean": self.mean, "std": self.std}
-        np.save(path, norm_stats)
+        np.save(path, self.stats)
 
-    def normalize(self, latlon):
-        return (latlon - self.mean) / self.std
+    def normalize(self, values, key):
+        return (values - self.stats[key]["mean"]) / self.stats[key]["std"]
 
-    def denormalize(self, latlon_norm):
-        return (latlon_norm * self.std) + self.mean
+    def denormalize(self, values, key):
+        return (values * self.stats[key]["std"]) + self.stats[key]["mean"]
 
-    def to_TorchNormalizer(self):
-        return TorchNormalizer(self.mean, self.std)
+    def to_TorchCoordsNormalizer(self):
+        mean = [self.stats["lat"]["mean"], self.stats["lon"]["mean"]]
+        std = [self.stats["lat"]["std"], self.stats["lon"]["std"]]
+        return TorchCoordsNormalizer(mean, std)

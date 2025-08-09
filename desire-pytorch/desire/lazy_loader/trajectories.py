@@ -6,7 +6,8 @@ from multiprocessing import Pool, cpu_count, get_context
 import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
-from desire.utils.normalizer import CoordsNormalizer
+from desire.utils.normalizer import Normalizer
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -42,23 +43,19 @@ def seq_collate(data):
     return obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, seq_start_end
 
 
-def add_time_col(df, min_timestamp):
-    # TODO make it adjust to interpolation step size
-    df["time"] = ((df["timestamp"].astype(int) - min_timestamp) / 5e9).astype(int)
-    return df
-
-
-def load_data(path, min_date, max_date):
-    df = pd.read_parquet(path)
-
+def process_time(df: pd.DataFrame, max_date, min_date, step_size=5) -> pd.DataFrame:
     if max_date is not None:
         max_date = pd.to_datetime(max_date) + pd.Timedelta(days=1)
         df = df[df["timestamp"] < max_date]
     if min_date is not None:
         min_date = pd.to_datetime(min_date)
         df = df[df["timestamp"] >= min_date]
+    df.copy().reset_index(drop=True)
 
-    return df.copy().reset_index(drop=True)
+    # TODO load interpolation step_size from config
+    df["time"] = df["timestamp"].astype("datetime64[s]").view("int64") // step_size
+    df = df.set_index("time").sort_index()
+    return df
 
 
 def get_in_frame_dict(edges, max_dist=None):
@@ -74,10 +71,10 @@ def get_in_frame_dict(edges, max_dist=None):
 
 
 def add_filled_gap_steps(df: pd.DataFrame, steps: int):
-    df = df.sort_values(by="time").reset_index(drop=True)
+    df = df.sort_index()
 
     new_rows = []
-    times = df["time"].values
+    times = df.index
 
     for i in range(len(times) - 1):
         current_time = times[i]
@@ -90,42 +87,40 @@ def add_filled_gap_steps(df: pd.DataFrame, steps: int):
         # Fill after current_time
         for j in range(1, min(steps + 1, gap)):
             row = df.iloc[i].copy()
-            row["time"] = current_time + j
+            row.name = current_time + j
             new_rows.append(row)
 
         # Fill before next_time
         for j in range(steps, 0, -1):
             if next_time - j > current_time:
                 row = df.iloc[i + 1].copy()
-                row["time"] = next_time - j
+                row.name = next_time - j
                 new_rows.append(row)
 
     # Fill after all
     current_time = times[-1]
     for j in range(1, steps + 1):
         row = df.iloc[-1].copy()
-        row["time"] = current_time + j
+        row.name = current_time + j
         new_rows.append(row)
 
     # Fill before next_time
     current_time = times[0]
     for j in range(steps, 0, -1):
         row = df.iloc[0].copy()
-        row["time"] = current_time - j
+        row.name = current_time - j
         new_rows.append(row)
 
     # Combine original and new
-    df_extra = pd.DataFrame(new_rows)
-    combined = pd.concat([df, df_extra], ignore_index=True)
-    combined = combined.drop_duplicates(subset=["time"])
-    combined = combined.sort_values(by="time").reset_index(drop=True)
+    combined = pd.concat([df, pd.DataFrame(new_rows)])
+    combined = combined[~combined.index.duplicated()].sort_index()
 
-    return combined[df.columns]
+    return combined
 
 
 def add_rel_latlon(df: pd.DataFrame):
-    # df should be sorted by time and unique mmsi
-    df["group_id"] = df["time"].diff().gt(1).fillna(False).groupby(df["mmsi"]).cumsum()
+    # df hast to be sorted by time and unique mmsi prior to function call!
+    df["group_id"] = df.index.to_series().diff().gt(1).cumsum()
     df[["rel_lat", "rel_lon"]] = df.groupby("group_id")[["lat", "lon"]].diff().fillna(0)
     return df
 
@@ -138,22 +133,24 @@ class LazyTrajectoryDataset(Dataset):
             "sailing_vessel": 1,
             "time_diff": 60,
             "in_waterways": 1,
-            "distance_shore": 500,
-            "to_bow": 10,
+            "distance_shore": 500, # max distance in kiel shore to shore
+            "to_bow": 10, # max distnace
             "to_stern": 10,
             "to_port": 10,
             "to_starboard": 10
         }
+
+        # use normalizer with mean and std and also save (max min)
+
     feat_cols_to_norm = [["origin_lat", "origin_lon"], ["destination_lat", "destination_lon"]]
     """
 
     def __init__(
         self,
-        nodes_path,
-        edges_path,
-        normalizer: CoordsNormalizer,
-        feat_cols: dict = {},  #
-        feat_cols_to_norm=[],  #
+        nodes_path: Path,
+        edges_path: Path,
+        normalizer_path: Path,
+        feat_cols=[],
         obs_len=8,
         pred_len=12,
         max_vessels=10,
@@ -178,58 +175,62 @@ class LazyTrajectoryDataset(Dataset):
         self.items = []
         self.obs_len = obs_len
         self.pred_len = pred_len
+        self.normalizer = Normalizer()
 
-        nodes = load_data(nodes_path, min_date, max_date)
-        min_timestamp = nodes["timestamp"].astype(int).min()
-        nodes = add_time_col(nodes, min_timestamp)
-        nodes = nodes.sort_values(by=["timestamp", "traj_id"])
+        edges: pd.DataFrame = pd.read_parquet(edges_path)
+        edges = process_time(edges, min_date, max_date)
+        mmsis_in_frame = get_in_frame_dict(edges)
+
+        nodes: pd.DataFrame = pd.read_parquet(nodes_path)
+        norm_cols = ["lat", "lon"] + feat_cols
+        if Path.exists():
+            self.normalizer.load_from_file(normalizer_path)
+        else:
+            self.normalizer.approximate_from_df(nodes, norm_cols)
+
+        nodes = process_time(nodes, min_date, max_date)
+
+        for col in norm_cols:
+            norm_by = "lat" if "lat" in col else "lon" if "lon" in col else col
+            nodes[col] = self.normalizer.normalize(nodes[col].astype(float), norm_by)
 
         exclude_mmsi = nodes[nodes["ship_type"].isin(exclude_ship_types)][
             "mmsi"
         ].unique()
 
-        edges = load_data(edges_path, min_date, max_date)
-        edges = add_time_col(edges, min_timestamp)
-        mmsis_in_frame = get_in_frame_dict(edges)
+        self.feature_cols = feat_cols
+        nodes = nodes[["mmsi", "lat", "lon"] + self.feature_cols]
 
-        for latlon in [["lat", "lon"]] + feat_cols_to_norm:
-            nodes[latlon] = normalizer.normalize(nodes[latlon])
-
-        self.feature_cols = sum(feat_cols_to_norm, []) + list(feat_cols.keys())
-        nodes = nodes[["time", "mmsi", "traj_id", "lat", "lon"] + self.feature_cols]
-
-        for key, norm_val in feat_cols.items():
-            nodes[key] = nodes[key].astype(float) / norm_val
-
-        min_cur_t = nodes["time"].min() + obs_len
-        max_cur_t = nodes["time"].max() - pred_len
-
-        for cur_t in tqdm(range(min_cur_t, max_cur_t)):
-            min_t = cur_t - obs_len
-            max_t = cur_t + pred_len
-            nodes_t = nodes[(nodes["time"] >= min_t) & (nodes["time"] < max_t)]
-
-            traj_len = nodes_t.groupby("mmsi").size().to_dict()
-            traj_len = {mmsi: l for mmsi, l in traj_len.items() if l >= pred_len}
-            valid_mmsi = list(traj_len.keys())
-
-            full_traj_mmsi = [
-                mmsi
-                for mmsi, l in traj_len.items()
-                if (l == obs_len + pred_len) and (mmsi not in exclude_mmsi)
-            ]
-
-            for mmsi in full_traj_mmsi:
-                others = mmsis_in_frame.get((cur_t - 1, mmsi), [])
-                others = [o for o in others if o in valid_mmsi][:max_vessels]
-                self.items.append((cur_t, mmsi, others))
+        for cur_t in tqdm(range(nodes.index[0], nodes.index[-1])):
+            self.add_items_at_t(nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_vessels)
 
         self.data = {}
         for mmsi, group in tqdm(nodes.groupby("mmsi")):
             df = add_filled_gap_steps(group, pred_len)
             df = add_rel_latlon(df)
-            df = df.set_index("time").sort_index()
             self.data[mmsi] = df
+
+    def add_items_at_t(self, nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_vessels):
+        nodes_t = nodes.loc[cur_t - self.obs_len : cur_t + self.pred_len]
+        if nodes_t.empty:
+            return
+
+        traj_len = nodes_t.groupby("mmsi").size().to_dict()
+        traj_len = {mmsi: l for mmsi, l in traj_len.items() if l >= self.pred_len}
+        valid_mmsi = list(traj_len.keys())
+
+        full_traj_mmsi = [
+            mmsi
+            for mmsi, l in traj_len.items()
+            if (l == self.obs_len + self.pred_len) and (mmsi not in exclude_mmsi)
+        ]
+
+        for mmsi in full_traj_mmsi:
+            others = mmsis_in_frame.get((cur_t - 1, mmsi), [])
+            others = [o for o in others if o in valid_mmsi]
+            if max_vessels is not None:
+                others = others[:max_vessels]
+            self.items.append((cur_t, mmsi, others))
 
     def __len__(self):
         return len(self.items)

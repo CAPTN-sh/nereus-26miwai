@@ -1,35 +1,18 @@
 import os
-import logging
-import sys
-import numpy as np
-import geopandas as gpd
 from pathlib import Path
-import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 import torch
 import torch.optim as optim
-import torch.multiprocessing as mp
-
 from desire.lazy_loader.trajectories import LazyTrajectoryDataset, seq_collate
 from desire.models import DESIRE
 from desire.utils.params import IOCParams, SGMParams
-from desire.utils.normalizer import CoordsNormalizer, TorchNormalizer
 from desire.nn.loss import *
-from PIL import Image
-import subprocess
-import re
 from tqdm import tqdm
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
-import argparse
-
-
 from PIL import Image
 import torchvision.transforms.functional as TF
 from torch import amp
-
 import torch.distributed as dist
-import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
@@ -52,15 +35,13 @@ def train_worker(
 
     nodes_path = Path("/home/bbiesenbach/data/kiel/ais/3_features/nodes.parquet")
     edges_path = Path("/home/bbiesenbach/data/kiel/ais/3_features/edges.parquet")
+    normalizer_path = Path("normalization_stats.npy").resolve()
     path_of_static_image = Path("scene_encoded.png").resolve()
-
-    normalizer = CoordsNormalizer()
-    normalizer.load_from_file(Path("normalization_stats.npy").resolve())
 
     train_dset = LazyTrajectoryDataset(
         nodes_path,
         edges_path,
-        normalizer,
+        normalizer_path,
         min_date="2022-04-15",
         max_date="2022-04-15",
     )
@@ -87,7 +68,7 @@ def train_worker(
 
     sgm_params = SGMParams()
     sgm_params.rnn_enc_x_params.input_size = 2 + len(train_dset.feature_cols)
-    normalizer = normalizer.to_TorchNormalizer().to(device)
+    normalizer = train_dset.normalizer.to_TorchCoordsNormalizer().to(device)
 
     desire = DESIRE(IOCParams(), sgm_params, normalizer).to(device)
     desire = DDP(desire, device_ids=[rank], find_unused_parameters=True)

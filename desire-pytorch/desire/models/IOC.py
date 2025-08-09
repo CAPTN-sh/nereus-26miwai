@@ -8,11 +8,11 @@ from desire.utils import get_fc_act
 from desire.nn import SCF
 import numpy as np
 from desire.nn import ScenePoolingCNN
-from desire.utils.normalizer import TorchNormalizer
+from desire.utils.normalizer import TorchCoordsNormalizer
 
 
 class IOC(nn.Module):
-    def __init__(self, params: IOCParams, normalizer: TorchNormalizer):
+    def __init__(self, params: IOCParams, normalizer: TorchCoordsNormalizer):
         super(IOC, self).__init__()
         self.params = params
 
