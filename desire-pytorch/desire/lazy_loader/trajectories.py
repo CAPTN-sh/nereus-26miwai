@@ -43,7 +43,14 @@ def seq_collate(data):
     return obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, seq_start_end
 
 
-def process_time(df: pd.DataFrame, max_date, min_date, step_size=5) -> pd.DataFrame:
+def get_interp_step_size(df: pd.DataFrame):
+    first_traj = df.loc[df["traj_id"] == df.iloc[0]["traj_id"]].copy()
+    ts = first_traj.sort_values("timestamp")["timestamp"]
+    step_size = int((ts.iloc[1] - ts.iloc[0]).total_seconds())
+    return step_size
+
+
+def process_time(df: pd.DataFrame, min_date, max_date, step_size) -> pd.DataFrame:
     if max_date is not None:
         max_date = pd.to_datetime(max_date) + pd.Timedelta(days=1)
         df = df[df["timestamp"] < max_date]
@@ -52,8 +59,7 @@ def process_time(df: pd.DataFrame, max_date, min_date, step_size=5) -> pd.DataFr
         df = df[df["timestamp"] >= min_date]
     df.copy().reset_index(drop=True)
 
-    # TODO load interpolation step_size from config
-    df["time"] = df["timestamp"].astype("datetime64[s]").view("int64") // step_size
+    df["time"] = df["timestamp"].astype("datetime64[s]").astype("int64") // step_size
     df = df.set_index("time").sort_index()
     return df
 
@@ -177,18 +183,17 @@ class LazyTrajectoryDataset(Dataset):
         self.pred_len = pred_len
         self.normalizer = Normalizer()
 
-        edges: pd.DataFrame = pd.read_parquet(edges_path)
-        edges = process_time(edges, min_date, max_date)
-        mmsis_in_frame = get_in_frame_dict(edges)
+        nodes = pd.read_parquet(nodes_path)
 
-        nodes: pd.DataFrame = pd.read_parquet(nodes_path)
         norm_cols = ["lat", "lon"] + feat_cols
-        if Path.exists():
+        if normalizer_path.exists():
             self.normalizer.load_from_file(normalizer_path)
         else:
             self.normalizer.approximate_from_df(nodes, norm_cols)
+            self.normalizer.save_to_file(normalizer_path)
 
-        nodes = process_time(nodes, min_date, max_date)
+        step_size = get_interp_step_size(nodes)
+        nodes = process_time(nodes, min_date, max_date, step_size)
 
         for col in norm_cols:
             norm_by = "lat" if "lat" in col else "lon" if "lon" in col else col
@@ -201,6 +206,10 @@ class LazyTrajectoryDataset(Dataset):
         self.feature_cols = feat_cols
         nodes = nodes[["mmsi", "lat", "lon"] + self.feature_cols]
 
+        edges = pd.read_parquet(edges_path)
+        edges = process_time(edges, min_date, max_date, step_size)
+        mmsis_in_frame = get_in_frame_dict(edges)
+
         for cur_t in tqdm(range(nodes.index[0], nodes.index[-1])):
             self.add_items_at_t(nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_vessels)
 
@@ -211,7 +220,7 @@ class LazyTrajectoryDataset(Dataset):
             self.data[mmsi] = df
 
     def add_items_at_t(self, nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_vessels):
-        nodes_t = nodes.loc[cur_t - self.obs_len : cur_t + self.pred_len]
+        nodes_t = nodes.loc[cur_t - self.obs_len : cur_t + self.pred_len - 1]
         if nodes_t.empty:
             return
 
