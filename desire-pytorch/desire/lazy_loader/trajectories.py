@@ -258,5 +258,5 @@ class LazyTrajectoryDataset(Dataset):
 
         return obs_abs, pred_abs, obs_rel, pred_rel
 
-    def _to_tensor(traj):
+    def _to_tensor(self, traj):
         return torch.tensor(np.stack(traj, axis=0)).permute(0, 2, 1).float()

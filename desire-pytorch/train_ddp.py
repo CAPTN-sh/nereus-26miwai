@@ -58,7 +58,8 @@ def train_worker(
 
     if rank == 0:
         print("additional features:", train_dset.feature_cols)
-        print("There are {} traj loaded".format(len(train_dset)))
+        print("There are {} traj loaded for training".format(len(train_dset)))
+        print("There are {} traj loaded for evaluation".format(len(eval_dset)))
 
     ### --- Step 3: Model --- ###
 
@@ -162,7 +163,7 @@ def eval(epoch, desire, eval_loader, device, scene, normalizer):
             obs_traj_rel, pred_traj_gt_rel, x_start, scene, seq_start_end
         )
 
-        tloss, (l2l, kld, cel, rl) = nn.loss.total_loss(
+        tloss, (l2l, kld, cel, rl) = total_loss(
             y_pred_traj, pred_delta, pred_traj_gt_rel, mean, log_var
         )
         num_batches = seq_start_end.size(0)

@@ -1,9 +1,11 @@
-import geopandas as gpd
 from pathlib import Path
+
+import geopandas as gpd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from desire.utils.normalizer import TorchCoordsNormalizer
+
 from desire.nn.loss import *
+from desire.utils.normalizer import TorchCoordsNormalizer
 
 
 def plot_traj(
@@ -25,7 +27,7 @@ def plot_traj(
 
     def plot_trajectories(ax, traj, i, color):
         traj_i = traj[i].detach().permute(1, 0)
-        traj_i = normalizer.denormalize(traj_i).cpu()
+        traj_i = normalizer.denormalize_coords(traj_i).cpu()
         xs = traj_i[:, 1].numpy()
         ys = traj_i[:, 0].numpy()
         ax.scatter(xs, ys, color=color, alpha=0.4, s=2)
