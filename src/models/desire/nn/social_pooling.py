@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch_scatter as ts
 
-from src.models.desire.utils import SocialPoolingParams
+from models.desire.utils.params import SocialPoolingParams
 
 
 def ring_indices(ydash, params: SocialPoolingParams):

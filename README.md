@@ -3,13 +3,12 @@
 ## Requirements
 To install all the requirements, one needs to first install:
 + conda
-+ poetry
-+ flower
 
-A detailed list of the required libraries can be found in:
-``poetry.toml``
+The proper installation must then be done with conda.
 
-The proper installation must then be done with poetry and conda.
+export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu124"
+export PIP_FIND_LINKS="https://data.pyg.org/whl/torch-2.5.1+cu124.html"
+pip install -e .
 
 ## Structure
 The project is structured in a way that allows for easy addition of new pipelines and tasks. 

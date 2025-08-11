@@ -3,10 +3,11 @@
 import torch
 import torch.nn as nn
 
-from src.lazy_loader.normalizer import TorchCoordsNormalizer
-from src.models.desire.nn import SCF, ScenePoolingCNN
-from src.models.desire.utils import IOCParams, get_fc_act
-
+from lazy_loader.normalizer import TorchCoordsNormalizer
+from models.desire.nn.scf import SCF
+from models.desire.nn.scene_pooling import ScenePoolingCNN
+from models.desire.utils.params import IOCParams
+from models.desire.utils.seq_net import get_fc_act
 
 class IOC(nn.Module):
     def __init__(self, params: IOCParams, normalizer: TorchCoordsNormalizer):

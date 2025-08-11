@@ -2,14 +2,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from src.lazy_loader.normalizer import TorchCoordsNormalizer
-from src.models.desire.nn import SocialPool
-from src.models.desire.utils import (
-    SCFParams,
-    SocialPoolingParams,
-    get_fc_act,
-    get_scene,
-)
+from lazy_loader.normalizer import TorchCoordsNormalizer
+from models.desire.nn.social_pooling import SocialPool
+from models.desire.utils.params import SCFParams, SocialPoolingParams
+from models.desire.utils.get_scene import get_scene
+from models.desire.utils.seq_net import get_fc_act
 
 
 class SCF(nn.Module):

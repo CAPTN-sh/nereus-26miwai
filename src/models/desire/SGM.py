@@ -1,8 +1,10 @@
 import torch
 import torch.nn as nn
 
-from src.models.desire.nn import CVAE, DecoderRNN, EncoderRNN
-from src.models.desire.utils import SGMParams
+from models.desire.nn.cvae import CVAE
+from models.desire.nn.rnn_decoder import DecoderRNN
+from models.desire.nn.rnn_encoder import EncoderRNN
+from models.desire.utils.params import SGMParams
 
 
 class SGM(nn.Module):

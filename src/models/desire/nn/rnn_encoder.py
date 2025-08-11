@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.models.desire.utils import EncoderRNNParams
+from models.desire.utils.params import EncoderRNNParams
 
 
 class EncoderRNN(nn.Module):

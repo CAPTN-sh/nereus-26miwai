@@ -1,0 +1,16 @@
+ipykernel # for Jupyter kernel interaction
+ipympl
+ipython # for interactive Python
+ipywidgets # for interactive widgets
+jupyter
+jupyter-client
+jupyter-core
+jupyterlab_widgets # for JupyterLab widgets
+mpl-tools
+mplcursors
+nb-conda-store-kernels # for managing conda environments as Jupyter kernels
+nbclean # for cleaning up notebook files
+nbresuse # resource reuse in notebooks
+notebook
+traitlets # for managing configuration
+jupyter-contrib-nbextensions # for Jupyter extensions

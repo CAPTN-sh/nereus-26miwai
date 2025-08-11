@@ -7,7 +7,7 @@ import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from src.lazy_loader.normalizer import Normalizer
+from lazy_loader.normalizer import Normalizer
 
 logger = logging.getLogger(__name__)
 

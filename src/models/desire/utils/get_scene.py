@@ -1,6 +1,6 @@
 import torch
 
-from src.lazy_loader.normalizer import TorchCoordsNormalizer
+from lazy_loader.normalizer import TorchCoordsNormalizer
 
 
 def get_scene(scene, ypred, scene_size, normalizer: TorchCoordsNormalizer):

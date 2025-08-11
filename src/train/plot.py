@@ -4,7 +4,7 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-from src.lazy_loader.normalizer import TorchCoordsNormalizer
+from lazy_loader.normalizer import TorchCoordsNormalizer
 
 
 def plot_traj(

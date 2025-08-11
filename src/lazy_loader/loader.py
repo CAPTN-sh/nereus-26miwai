@@ -4,7 +4,7 @@ import pandas as pd
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from src.lazy_loader.trajectories import LazyTrajectoryDataset, seq_collate
+from lazy_loader.trajectories import LazyTrajectoryDataset, seq_collate
 
 
 def lazy_loader(

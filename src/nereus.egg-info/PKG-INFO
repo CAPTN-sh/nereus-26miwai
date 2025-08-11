@@ -1,58 +1,37 @@
 Metadata-Version: 2.4
-Name: nereus-processing
+Name: nereus
 Version: 1.0.0
-Summary: Processing Dependencies for Context-aware Surface Vessels Trajectory Analysis and Prediction
+Summary: Dependencies for Nautical Environment-aware Route Estimation Under Uncertainty for Surface Vessels
 Author-email: Ben Biesenbach <stu232913@mail.uni-kiel.de>, Ghassan Al-Falouji <gaf@informatik.uni-kiel.de>
 Requires-Python: <3.13,>=3.11
 Description-Content-Type: text/markdown
-Requires-Dist: pandas
-Requires-Dist: pyais
-Requires-Dist: geopandas
-Requires-Dist: movingpandas
-Requires-Dist: geopy
-Requires-Dist: tqdm
-Requires-Dist: matplotlib
 Requires-Dist: numpy
-Requires-Dist: PyYAML
 Requires-Dist: scipy
+Requires-Dist: pandas
+Requires-Dist: tqdm
+Requires-Dist: pyyaml
+Requires-Dist: matplotlib
+Requires-Dist: pyarrow
+Requires-Dist: geopandas
 Requires-Dist: shapely
-Requires-Dist: torch>=2.5.0
-Requires-Dist: torchvision>=0.20.0
-Provides-Extra: jupyter
-Requires-Dist: ipykernel; extra == "jupyter"
-Requires-Dist: ipympl; extra == "jupyter"
-Requires-Dist: ipython; extra == "jupyter"
-Requires-Dist: ipywidgets; extra == "jupyter"
-Requires-Dist: jupyter; extra == "jupyter"
-Requires-Dist: jupyter-client; extra == "jupyter"
-Requires-Dist: jupyter-core; extra == "jupyter"
-Requires-Dist: jupyterlab_widgets; extra == "jupyter"
-Requires-Dist: mpl-tools; extra == "jupyter"
-Requires-Dist: mplcursors; extra == "jupyter"
-Requires-Dist: nb-conda-store-kernels; extra == "jupyter"
-Requires-Dist: nbclean; extra == "jupyter"
-Requires-Dist: nbresuse; extra == "jupyter"
-Requires-Dist: notebook; extra == "jupyter"
-Requires-Dist: traitlets; extra == "jupyter"
-Requires-Dist: jupyter-contrib-nbextensions; extra == "jupyter"
-Provides-Extra: lint
-Requires-Dist: flake8; extra == "lint"
-Requires-Dist: isort; extra == "lint"
-Requires-Dist: mypy; extra == "lint"
-Requires-Dist: black; extra == "lint"
+Requires-Dist: pyogrio
+Requires-Dist: pyais
+Requires-Dist: movingpandas
+Requires-Dist: torch==2.5.1
+Requires-Dist: torchvision==0.20.1
+Requires-Dist: torch_scatter
 
 # Context-aware probabilistic ship trajectory forecasting
 
 ## Requirements
 To install all the requirements, one needs to first install:
 + conda
-+ poetry
-+ flower
 
-A detailed list of the required libraries can be found in:
-``poetry.toml``
+The proper installation must then be done with conda.
 
-The proper installation must then be done with poetry and conda.
+export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu124"
+export PIP_FIND_LINKS="https://data.pyg.org/whl/torch-2.5.1+cu124.html"
+pip install -e .
 
 ## Structure
 The project is structured in a way that allows for easy addition of new pipelines and tasks. 

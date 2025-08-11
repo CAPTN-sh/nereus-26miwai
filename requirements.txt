@@ -1,0 +1,22 @@
+# ---- core stack ----
+numpy
+scipy
+pandas
+tqdm
+pyyaml
+matplotlib
+pyarrow
+
+# ---- geo stack ----
+geopandas
+shapely
+pyogrio
+
+# ---- ais stack ----
+pyais
+movingpandas
+
+# ---- torch stack ----
+torch==2.5.1
+torchvision==0.20.1
+torch_scatter

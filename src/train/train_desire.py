@@ -14,10 +14,10 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
 
 from models.desire.model import DESIRE
-from src.lazy_loader.loader import lazy_loader
-from src.models.desire.nn.loss import total_loss
-from src.models.desire.utils.params import IOCParams, SGMParams
-from src.train.plot import plot_traj
+from lazy_loader.loader import lazy_loader
+from models.desire.nn.loss import total_loss
+from models.desire.utils.params import IOCParams, SGMParams
+from train.plot import plot_traj
 
 
 def train_worker(
@@ -41,7 +41,7 @@ def train_worker(
     train_dset, train_sampler, train_loader = lazy_loader(
         data_folder=data_folder,
         min_date=pd.Timestamp("2022-04-15"),
-        max_date=pd.Timestamp("2022-04-20"),
+        max_date=pd.Timestamp("2022-04-16"),
         world_size=world_size,
         rank=rank,
         batch_size=batch_size,
@@ -50,7 +50,7 @@ def train_worker(
     eval_dset, eval_sampler, eval_loader = lazy_loader(
         data_folder=data_folder,
         min_date=pd.Timestamp("2022-04-21"),
-        max_date=pd.Timestamp("2022-04-21"),
+        max_date=pd.Timestamp("2022-04-22"),
         world_size=world_size,
         rank=rank,
         batch_size=batch_size,
@@ -194,5 +194,5 @@ def get_distributed_args():
 if __name__ == "__main__":
     rank, world_size, local_rank = get_distributed_args()
     data_folder = Path("/home/bbiesenbach/data/kiel/ais/3_features")
-    scene_path = Path("/home/bbiesenbach/data/kiel/scenes/scene_encoded.png")
+    scene_path = Path("data/kiel/scenes/scene_encoded.png")
     train_worker(rank, world_size, local_rank, data_folder, scene_path)

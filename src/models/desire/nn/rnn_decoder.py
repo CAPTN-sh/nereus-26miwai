@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-from src.models.desire.utils import DecoderRNNParams
+from models.desire.utils.params import DecoderRNNParams
 
 
 class DecoderRNN(nn.Module):

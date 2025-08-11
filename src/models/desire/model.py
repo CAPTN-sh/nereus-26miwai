@@ -3,8 +3,8 @@ import torch.nn as nn
 
 from models.desire.IOC import IOC
 from models.desire.SGM import SGM
-from src.lazy_loader.normalizer import TorchCoordsNormalizer
-from src.models.desire.utils import IOCParams, SGMParams
+from lazy_loader.normalizer import TorchCoordsNormalizer
+from models.desire.utils.params import IOCParams, SGMParams
 
 
 class DESIRE(nn.Module):
