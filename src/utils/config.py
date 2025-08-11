@@ -1,8 +1,9 @@
-import yaml
-import threading
 import os
 import shutil
+import threading
 from pathlib import Path
+
+import yaml
 
 
 class Config:
@@ -40,7 +41,7 @@ class Config:
 
     def _load_main_config(self):
         if not os.path.exists(self._path):
-            raise FileNotFoundError(f"Config was not initialized")
+            raise FileNotFoundError("Config was not initialized")
         with open(self._path, "r") as f:
             return yaml.safe_load(f)
 

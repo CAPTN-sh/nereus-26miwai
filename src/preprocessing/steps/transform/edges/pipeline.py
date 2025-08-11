@@ -1,10 +1,11 @@
 from pathlib import Path
+
+import geopandas as gpd
 import pandas as pd
 
-from utils.config import Config
+from preprocessing.pipeline.pipeline import Pipeline
 from preprocessing.steps.transform.edges.ship import ShipProcessor
-import geopandas as gpd
-from preprocessing.utils.pipeline.pipeline import Pipeline
+from utils.config import Config
 
 
 class EdgesPipeline(Pipeline):

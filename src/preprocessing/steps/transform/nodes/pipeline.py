@@ -1,8 +1,10 @@
 from pathlib import Path
+
 import pandas as pd
-from utils.config import Config
+
+from preprocessing.pipeline.pipeline import Pipeline
 from preprocessing.steps.transform.nodes.trajectory import TrajectoryProcessor
-from preprocessing.utils.pipeline.pipeline import Pipeline
+from utils.config import Config
 
 
 class NodesPipeline(Pipeline):
@@ -12,13 +14,7 @@ class NodesPipeline(Pipeline):
     def load_tasks(self):
 
         paths = Path(self.config["paths"]["in_folder"]).glob("*_traj.parquet")
-        valid_paths = []
-        for path in paths:
-            name = path.name
-            date_part = name.split("_")[0]
-            if "20220315" <= date_part <= "20220615":
-                valid_paths.append(path)
-        dfs = [pd.read_parquet(path, engine="pyarrow") for path in valid_paths]
+        dfs = [pd.read_parquet(path, engine="pyarrow") for path in paths]
         trajs_df = pd.concat(dfs).reset_index(drop=True)
 
         paths = Path(self.config["paths"]["in_folder"]).glob("ship_info*.parquet")

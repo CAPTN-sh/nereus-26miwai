@@ -1,10 +1,11 @@
 import pandas as pd
-from pandas import DataFrame
+from geopandas import GeoDataFrame
 from movingpandas import Trajectory, TrajectoryCollection
-from preprocessing.utils.pipeline.function_inport import import_from_string
+from pandas import DataFrame
+
+from preprocessing.pipeline.function_inport import import_from_string
 from preprocessing.utils.df_helper import drop_duplicates, to_GeoDataFrame
 from utils.config import Config
-from geopandas import GeoDataFrame
 
 
 class TrajectoryProcessor:

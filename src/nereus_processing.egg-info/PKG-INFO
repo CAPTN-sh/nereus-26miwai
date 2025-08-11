@@ -1,3 +1,46 @@
+Metadata-Version: 2.4
+Name: nereus-processing
+Version: 1.0.0
+Summary: Processing Dependencies for Context-aware Surface Vessels Trajectory Analysis and Prediction
+Author-email: Ben Biesenbach <stu232913@mail.uni-kiel.de>, Ghassan Al-Falouji <gaf@informatik.uni-kiel.de>
+Requires-Python: <3.13,>=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: pandas
+Requires-Dist: pyais
+Requires-Dist: geopandas
+Requires-Dist: movingpandas
+Requires-Dist: geopy
+Requires-Dist: tqdm
+Requires-Dist: matplotlib
+Requires-Dist: numpy
+Requires-Dist: PyYAML
+Requires-Dist: scipy
+Requires-Dist: shapely
+Requires-Dist: torch>=2.5.0
+Requires-Dist: torchvision>=0.20.0
+Provides-Extra: jupyter
+Requires-Dist: ipykernel; extra == "jupyter"
+Requires-Dist: ipympl; extra == "jupyter"
+Requires-Dist: ipython; extra == "jupyter"
+Requires-Dist: ipywidgets; extra == "jupyter"
+Requires-Dist: jupyter; extra == "jupyter"
+Requires-Dist: jupyter-client; extra == "jupyter"
+Requires-Dist: jupyter-core; extra == "jupyter"
+Requires-Dist: jupyterlab_widgets; extra == "jupyter"
+Requires-Dist: mpl-tools; extra == "jupyter"
+Requires-Dist: mplcursors; extra == "jupyter"
+Requires-Dist: nb-conda-store-kernels; extra == "jupyter"
+Requires-Dist: nbclean; extra == "jupyter"
+Requires-Dist: nbresuse; extra == "jupyter"
+Requires-Dist: notebook; extra == "jupyter"
+Requires-Dist: traitlets; extra == "jupyter"
+Requires-Dist: jupyter-contrib-nbextensions; extra == "jupyter"
+Provides-Extra: lint
+Requires-Dist: flake8; extra == "lint"
+Requires-Dist: isort; extra == "lint"
+Requires-Dist: mypy; extra == "lint"
+Requires-Dist: black; extra == "lint"
+
 # Context-aware probabilistic ship trajectory forecasting
 
 ## Requirements

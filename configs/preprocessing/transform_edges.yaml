@@ -1,0 +1,26 @@
+paths:
+  in_folder: "data/kiel/ais/3_features" # "/home/bbiesenbach/data/kiel/ais/3_features"
+  out_folder: "data/kiel/ais/3_features"
+
+max_edge_dist: 2000 # in meters
+
+pipeline_steps:
+  [
+    "add_feature"
+  ]
+
+add_feature:
+  - metric: preprocessing.steps.transform.edges.metrics.get_abs_bearing
+    args:
+      col_name: "abs_bearing"
+      arg_cols: ["lat", "lon"]
+      
+  - metric: preprocessing.steps.transform.edges.metrics.get_rel_bearing
+    args:
+      col_name: "rel_bearing"
+      arg_cols: ["lat", "lon", "direction"]
+
+  - metric: preprocessing.steps.transform.edges.metrics.get_rel_speed
+    args:
+      col_name: "rel_speed"
+      arg_cols: ["calc_speed", "direction"]

@@ -1,7 +1,8 @@
+from typing import Iterable, List
+
 from movingpandas import Trajectory
-from typing import Iterable
-from preprocessing.utils.pipeline.function_inport import import_from_string
-from typing import List
+
+from preprocessing.pipeline.function_inport import import_from_string
 
 
 def detect_outliers(

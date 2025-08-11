@@ -1,6 +1,8 @@
-from utils.config import Config
 import glob
+
 import geopandas as gpd
+
+from utils.config import Config
 
 DEFAULT_CRS = "EPSG:4326"
 

@@ -1,8 +1,10 @@
-from movingpandas import Trajectory
-from typing import Iterable
-from preprocessing.utils.pipeline.function_inport import import_from_string
 import re
 from datetime import timedelta
+from typing import Iterable
+
+from movingpandas import Trajectory
+
+from preprocessing.pipeline.function_inport import import_from_string
 
 
 def split(trajectories: Iterable[Trajectory], cls, **args):

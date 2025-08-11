@@ -1,9 +1,11 @@
-from preprocessing.steps.decoding.decoder import Decoder
-from preprocessing.utils.pipeline.pipeline import Pipeline
-import pandas as pd
-from pathlib import Path
-from utils.config import Config
 from collections import defaultdict
+from pathlib import Path
+
+import pandas as pd
+
+from preprocessing.pipeline.pipeline import Pipeline
+from preprocessing.steps.decoding.decoder import Decoder
+from utils.config import Config
 
 
 class DecodingPipeline(Pipeline):
