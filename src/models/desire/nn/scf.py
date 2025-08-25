@@ -1,58 +1,26 @@
-import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-from lazy_loader.normalizer import TorchCoordsNormalizer
 from models.desire.nn.social_pooling import SocialPool
-from models.desire.utils.params import SCFParams, SocialPoolingParams
-from models.desire.utils.get_scene import get_scene
-from models.desire.utils.seq_net import get_fc_act
+from models.desire.utils.get_scene import sample_scene_features
+from models.desire.utils.params import DESIREParams
 
 
 class SCF(nn.Module):
-    def __init__(self, index, params: SCFParams, normalizer: TorchCoordsNormalizer):
+    def __init__(self, params: DESIREParams):
         super(SCF, self).__init__()
-        self.params = params
-        self.index = index
-        self.velocity_fc = get_fc_act(params.velocity_fc)
-        self.sp_nn = SocialPool(index, SocialPoolingParams())
-        self.normalizer = normalizer
+        self.velocity_fc = nn.Linear(params.pred_dim, params.intermediate_size)
+        self.social_pool = SocialPool(params)
 
-    def forward(
-        self, hidden, y_pred, y_pred_rel, velocity, scene, x_start, seq_start_end=None
-    ):
+    def forward(self, hidden, pred_pos_abs, pred_pos_rel, seq_start_end, scene_feats, scene_meta):
+        scene_out = sample_scene_features(
+            scene_feats=scene_feats,
+            pred_pos_abs=pred_pos_abs,
+            pos_to_px=scene_meta["world_to_bev"],
+            feature_stride=scene_meta["feature_stride"]
+        )
 
-        vel_out = self.velocity_fc(y_pred_rel)
-        # print(y_pred.device,
-        #       x_start.device,
-        #       hidden.device,
-        #       vel_out.device)
-
-        scene_out = get_scene(scene, y_pred, self.params.scene_size, self.normalizer)
-
-        # print("scene out device", scene_out.device)
-        sp_out = self.sp_nn(y_pred, x_start, hidden, seq_start_end)
-        # print("Shapes 1", y_pred.shape, x_start.shape, scene.shape)
-        # print ("Shapes",
-        #        sp_out.shape,
-        #        vel_out.shape,
-        #        scene_out.shape)
+        vel_out = F.relu(self.velocity_fc(pred_pos_rel))
+        sp_out = self.social_pool(pred_pos_abs, hidden, seq_start_end)
         return torch.cat((sp_out, vel_out, scene_out), 1)
-
-
-if __name__ == "__main__":
-    idx = 0
-    num_agents = 4
-    dimensions = 2
-    length = 12
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    scf = SCF(idx, SCFParams()).to(device)
-    print(scf)
-    y = torch.randn(num_agents, dimensions)
-    x_start = torch.randn(num_agents, dimensions).to(device)
-    v = torch.Tensor(np.gradient(y, axis=0)).to(device)
-    y = y.to(device)
-    hidden = torch.randn(num_agents, 48).to(device)
-    scene = torch.randn(32, 720 // 2, 576 // 2).to(device)
-
-    m = scf(hidden, y, v, scene, x_start)

@@ -1,35 +1,35 @@
 import logging
+from datetime import timedelta
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pyproj
 import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
-
-from lazy_loader.normalizer import Normalizer
 
 logger = logging.getLogger(__name__)
 
 
 def seq_collate(data):
-    (obs_seq_list, pred_seq_list, obs_seq_rel_list, pred_seq_rel_list) = zip(*data)
+    (obs_feat_seq, obs_pos_seq, obs_pos_rel_seq, fut_pos_seq, fut_pos_rel_seq) = zip(*data)
 
-    _len = [len(seq) for seq in obs_seq_list]
+    _len = [len(seq) for seq in obs_pos_seq]
     cum_start_idx = [0] + np.cumsum(_len).tolist()
     seq_start_end = [
         [start, end] for start, end in zip(cum_start_idx, cum_start_idx[1:])
     ]
 
-    # Data format: batch, input_size, seq_len
-    # LSTM input format: seq_len, batch, input_size
-    obs_traj = torch.cat(obs_seq_list, dim=0).permute(2, 0, 1)
-    pred_traj = torch.cat(pred_seq_list, dim=0).permute(2, 0, 1)
-    obs_traj_rel = torch.cat(obs_seq_rel_list, dim=0).permute(2, 0, 1)
-    pred_traj_rel = torch.cat(pred_seq_rel_list, dim=0).permute(2, 0, 1)
+    # [B, C, T] (batch, channels, time)
+    obs_feat = torch.cat(obs_feat_seq, dim=0)
+    obs_pos = torch.cat(obs_pos_seq, dim=0)
+    obs_pos_rel = torch.cat(obs_pos_rel_seq, dim=0)
+    fut_pos = torch.cat(fut_pos_seq, dim=0)
+    fut_pos_rel = torch.cat(fut_pos_rel_seq, dim=0)
     seq_start_end = torch.LongTensor(seq_start_end)
 
-    return obs_traj, pred_traj, obs_traj_rel, pred_traj_rel, seq_start_end
+    return obs_feat, obs_pos, obs_pos_rel, fut_pos, fut_pos_rel, seq_start_end
 
 
 def get_interp_step_size(df: pd.DataFrame):
@@ -42,7 +42,7 @@ def get_interp_step_size(df: pd.DataFrame):
 def process_time(
     df: pd.DataFrame, min_date: pd.Timestamp, max_date: pd.Timestamp, step_size: int
 ) -> pd.DataFrame:
-    df = df[df["timestamp"].between(min_date, max_date)].copy().reset_index(drop=True)
+    df = df[df["timestamp"].between(min_date, max_date + timedelta(days = 1))].copy().reset_index(drop=True)
     df["time"] = df["timestamp"].astype("datetime64[s]").astype("int64") // step_size
     df = df.set_index("time").sort_index()
     return df
@@ -107,39 +107,33 @@ def add_filled_gap_steps(df: pd.DataFrame, steps: int):
 
     return combined
 
-
-def add_rel_latlon(df: pd.DataFrame):
+def add_rel_pos(df: pd.DataFrame):
     # df hast to be sorted by time and unique mmsi prior to function call!
     df["group_id"] = df.index.to_series().diff().gt(1).cumsum()
-    df[["rel_lat", "rel_lon"]] = df.groupby("group_id")[["lat", "lon"]].diff().fillna(0)
+    df[["rel_x", "rel_y"]] = df.groupby("group_id")[["x", "y"]].diff().fillna(0)
     return df
 
+def cords_to_meters(df: pd.DataFrame):
+    latlon_cols = [col for col in df.columns if "lat" in col or "lon" in col]
+    if len(latlon_cols) % 2 != 0:
+        raise ValueError(f"Uneven number of lat/lon columns: {latlon_cols}")
+    
+    # TODO get CRS from config
+    transformer = pyproj.Transformer.from_crs(pyproj.CRS("EPSG:4326"), pyproj.CRS("EPSG:32632"), always_xy=True)
+    for i in range(0, len(latlon_cols), 2):
+        lon_col = latlon_cols[i] if "lon" in latlon_cols[i] else latlon_cols[i+1]
+        lat_col = latlon_cols[i] if "lat" in latlon_cols[i] else latlon_cols[i+1]
+        df[lon_col], df[lat_col] = transformer.transform(df[lon_col].values, df[lat_col].values)
+    df.columns = [col.replace("lon", "x").replace("lat", "y") for col in df.columns]
+    return df
 
 class LazyTrajectoryDataset(Dataset):
     """Dataloder for the Trajectory datasets"""
-
-    """
-    feat_cols = {
-            "sailing_vessel": 1,
-            "time_diff": 60,
-            "in_waterways": 1,
-            "distance_shore": 500, # max distance in kiel shore to shore
-            "to_bow": 10, # max distnace
-            "to_stern": 10,
-            "to_port": 10,
-            "to_starboard": 10
-        }
-
-        # use normalizer with mean and std and also save (max min)
-
-    feat_cols_to_norm = [["origin_lat", "origin_lon"], ["destination_lat", "destination_lon"]]
-    """
 
     def __init__(
         self,
         nodes_path: Path,
         edges_path: Path,
-        normalizer_path: Path,
         min_date: pd.Timestamp,
         max_date: pd.Timestamp,
         feat_cols=[],
@@ -163,18 +157,12 @@ class LazyTrajectoryDataset(Dataset):
         """
         super(LazyTrajectoryDataset, self).__init__()
         self.items = []
+        self.data = {}
         self.obs_len = obs_len
         self.pred_len = pred_len
-        self.normalizer = Normalizer()
+        self.feature_cols = feat_cols
 
         nodes = pd.read_parquet(nodes_path)
-
-        norm_cols = ["lat", "lon"] + feat_cols
-        if normalizer_path.exists():
-            self.normalizer.load_from_file(normalizer_path)
-        else:
-            self.normalizer.approximate_from_df(nodes, norm_cols)
-            self.normalizer.save_to_file(normalizer_path)
 
         step_size = get_interp_step_size(nodes)
         nodes = process_time(nodes, min_date, max_date, step_size)
@@ -182,16 +170,14 @@ class LazyTrajectoryDataset(Dataset):
         if nodes.empty:
             raise ValueError("There are no values within the given time range.")
 
-        for col in norm_cols:
-            norm_by = "lat" if "lat" in col else "lon" if "lon" in col else col
-            nodes[col] = self.normalizer.normalize(nodes[col].astype(float), norm_by)
-
         exclude_mmsi = nodes[nodes["ship_type"].isin(exclude_ship_types)][
             "mmsi"
         ].unique()
 
-        self.feature_cols = feat_cols
+
         nodes = nodes[["mmsi", "lat", "lon"] + self.feature_cols]
+        nodes = cords_to_meters(nodes)
+        self.feature_cols = [col.replace("lon", "x").replace("lat", "y") for col in self.feature_cols]
 
         edges = pd.read_parquet(edges_path)
         edges = process_time(edges, min_date, max_date, step_size)
@@ -202,10 +188,9 @@ class LazyTrajectoryDataset(Dataset):
                 nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_vessels
             )
 
-        self.data = {}
         for mmsi, group in tqdm(nodes.groupby("mmsi")):
             df = add_filled_gap_steps(group, pred_len)
-            df = add_rel_latlon(df)
+            df = add_rel_pos(df)
             self.data[mmsi] = df
 
     def _add_items_at_t(self, nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_vessels):
@@ -236,27 +221,30 @@ class LazyTrajectoryDataset(Dataset):
     def __getitem__(self, index):
         cur_t, cur_mmsi, others = self.items[index]
 
-        obs_abs = []
-        obs_rel = []
-        pred_abs = []
-        pred_rel = []
+        obs_feat = []
+        obs_pos = []
+        obs_pos_rel = []
+        fut_pos = []
+        fut_pos_rel = []
 
         for mmsi in [cur_mmsi] + others:
             df = self.data[mmsi]
-            obs_traj = df.loc[cur_t - self.obs_len : cur_t - 1]
-            pred_traj = df.loc[cur_t : cur_t + self.pred_len - 1]
+            obs_df = df.loc[cur_t - self.obs_len : cur_t - 1]
+            fut_df = df.loc[cur_t : cur_t + self.pred_len - 1]
 
-            obs_abs.append(obs_traj[["lat", "lon"]].values)
-            obs_rel.append(obs_traj[["rel_lat", "rel_lon"] + self.feature_cols].values)
-            pred_abs.append(pred_traj[["lat", "lon"]].values)
-            pred_rel.append(pred_traj[["rel_lat", "rel_lon"]].values)
+            obs_feat.append(obs_df[self.feature_cols].values)
+            obs_pos.append(obs_df[["x", "y"]].values)
+            obs_pos_rel.append(obs_df[["rel_x", "rel_y"]].values)
+            fut_pos.append(fut_df[["x", "y"]].values)
+            fut_pos_rel.append(fut_df[["rel_x", "rel_y"]].values)
 
-        obs_abs = self._to_tensor(obs_abs)
-        obs_rel = self._to_tensor(obs_rel)
-        pred_abs = self._to_tensor(pred_abs)
-        pred_rel = self._to_tensor(pred_rel)
+        obs_feat = self._to_tensor(obs_feat)
+        obs_pos = self._to_tensor(obs_pos)
+        obs_pos_rel = self._to_tensor(obs_pos_rel)
+        fut_pos = self._to_tensor(fut_pos)
+        fut_pos_rel = self._to_tensor(fut_pos_rel)
 
-        return obs_abs, pred_abs, obs_rel, pred_rel
+        return obs_feat, obs_pos, obs_pos_rel, fut_pos, fut_pos_rel
 
     def _to_tensor(self, traj):
         return torch.tensor(np.stack(traj, axis=0)).permute(0, 2, 1).float()

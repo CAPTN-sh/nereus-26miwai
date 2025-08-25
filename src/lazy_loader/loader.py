@@ -15,12 +15,12 @@ def lazy_loader(
     rank: int,
     batch_size: int,
     feat_cols=[],
+    pin_memory=True,
 ):
 
     dset = LazyTrajectoryDataset(
         nodes_path=data_folder / "nodes.parquet",
         edges_path=data_folder / "edges.parquet",
-        normalizer_path=data_folder / "normalization_stats.npy",
         min_date=min_date,
         max_date=max_date,
         feat_cols=feat_cols,
@@ -34,7 +34,7 @@ def lazy_loader(
         sampler=sampler,
         num_workers=8,
         collate_fn=seq_collate,
-        pin_memory=True,
+        pin_memory=pin_memory,
         drop_last=True,
     )
     return dset, sampler, loader

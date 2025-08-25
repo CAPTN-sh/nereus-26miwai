@@ -1,118 +1,76 @@
 import torch
 import torch.nn as nn
 
-from models.desire.nn.cvae import CVAE
-from models.desire.nn.rnn_decoder import DecoderRNN
-from models.desire.nn.rnn_encoder import EncoderRNN
-from models.desire.utils.params import SGMParams
+from models.desire.nn.cvae import CVAEEncoder
+from models.desire.nn.rnn import RNNDecoder, RNNEncoder
+from models.desire.utils.params import DESIREParams
 
 
 class SGM(nn.Module):
-    def __init__(self, params: SGMParams):
-        super(SGM, self).__init__()
+    """
+    Sample Generation Module (DESIRE) — K-sample
 
-        self.params = params
-        self.cvae = CVAE(params.cvae_params)
+    3.1. Diverse Sample Generation with CVAE
+    """
+    def __init__(self, params: DESIREParams):
+        super().__init__()
+        self.pred_len = params.pred_len
+        self.hidden_size = params.hidden_size
+        self.latent_size = params.latent_size
+        self.num_samples = params.num_samples
 
-        self.enc_x = EncoderRNN(params.rnn_enc_x_params)
-        self.enc_y = EncoderRNN(params.rnn_enc_y_params)
+        self.enc_obs = RNNEncoder(params, kernel_size=3)
+        self.enc_fut = RNNEncoder(params, kernel_size=1)
 
-        self.dec = DecoderRNN(params.rnn_dec_params)
-        self.dec_fc = nn.Linear(
-            params.rnn_dec_params.gru_hidden_size, params.final_output_size
-        )
+        self.cvae = CVAEEncoder(params)
+        self.beta_fc = nn.Linear(self.latent_size, self.hidden_size, bias=True)
 
-    def forward(self, obs_traj_rel, pred_traj_gt_rel):
+        self.dec = RNNDecoder(params)
+        self.dec_to_pos = nn.Linear(self.hidden_size, params.pred_dim)
+        self.pos_to_dec = nn.Linear(params.pred_dim, self.hidden_size)
 
-        x = obs_traj_rel  # [B, 2, 8]
-        y = pred_traj_gt_rel  # [B, 2, 12]
+    def forward(self, obs_pos_rel: torch.Tensor, fut_pos_rel: torch.Tensor):
+        device = obs_pos_rel.device
+        B = fut_pos_rel.shape[0]
 
-        device = x.device
-        x_enc_out, x_enc_hidden = self.enc_x(x)  # [8, B, 48]
-        y_enc_out, y_enc_hidden = self.enc_y(y)  # [12, B, 48]
+        # encode obs and fut
+        hidde_obs_enc = self.enc_obs(obs_pos_rel)[1][-1]
+        hidde_fut_enc = self.enc_fut(fut_pos_rel)[1][-1]
 
-        recon_y, means, log_var, z = self.cvae(
-            y_enc_hidden[-1], x_enc_hidden[-1]
-        )  # [B, 48]
+        # sample k times
+        mean, log_var = self.cvae(hidde_fut_enc, hidde_obs_enc)
+        std = (0.5 * log_var).exp().unsqueeze(1)
+        eps = torch.randn(B, self.num_samples, self.latent_size, device=device)
+        z_k = mean.unsqueeze(1) + std * eps
 
-        masked_out = self.get_masked_out(recon_y, x_enc_hidden[-1])  # [B, 12, 48]
-        hidden_rnn_dec_input = torch.zeros_like(masked_out)
+        pred_pos_rel = self.generate_traj(hidde_obs_enc, z_k, B, device)
+        return pred_pos_rel, hidde_obs_enc, mean, log_var
 
-        dec_out, dec_hidden = self.dec(masked_out, hidden_rnn_dec_input)  # [B, 12, 48]
+    def inference(self, obs_pos_rel: torch.Tensor):
+        device = obs_pos_rel.device
+        B = obs_pos_rel.size(0)
 
-        dec_out = dec_out.transpose(1, 2)
-        # [B, 48, 12] # Swap seq_length with no of dimensions
-        dec_out_list = []
-        for i in range(dec_out.size(2)):
-            dec_out_list.append(self.dec_fc(dec_out[:, :, i]))
+        # Encode observed
+        hidde_obs_enc = self.enc_obs(obs_pos_rel)[1][-1]
 
-        pred_traj_rel = torch.stack(dec_out_list, dim=2)  # [B, 2, 12]
-        x_last_hidden = x_enc_out[:, -1, :]  # [B, 48]
+        # Sample z_k ~ N(0,I) for prior
+        z_k = torch.randn(B, self.num_samples, self.latent_size, device=device)   # [B,K,L]
 
-        return pred_traj_rel, x_last_hidden, means, log_var
+        pred_pos_rel = self.generate_traj(hidde_obs_enc, z_k, B, device)
+        return pred_pos_rel, hidde_obs_enc
+    
+    def generate_traj(self, hidde_obs_enc, z_k, B, device):
+        # guided drop out
+        beta = torch.softmax(self.beta_fc(z_k), dim=-1)
+        x_t0 = hidde_obs_enc.unsqueeze(1) * beta
 
-    def inference(self, x):
-        device = x.device
-        x_enc_out, x_enc_hidden = self.enc_x(x)
-        # print(x_enc_hidden[-1].shape, self.cvae.latent_size, x_enc_hidden.size(0))
-        recon_y = self.cvae.inference(x_enc_hidden[-1], x_enc_hidden[-1].size(0))
+        # Decoding
+        zeros_tail = torch.zeros(B * self.num_samples, self.pred_len-1, self.hidden_size, device=device)
+        x_t0 = x_t0.view(B * self.num_samples, 1, self.hidden_size).contiguous()
+        x_seq = torch.cat([x_t0, zeros_tail], dim=1)
 
-        masked_out = self.get_masked_out(recon_y, x_enc_hidden[-1])
-        hidden_rnn_dec_input = torch.zeros_like(masked_out)
-        dec_out, dec_hidden = self.dec(masked_out, hidden_rnn_dec_input)
-        dec_out.transpose_(1, 2)  # Swap seq_length with no of dimensions
-        dec_out_list = []
-        for i in range(dec_out.size(2)):
-            dec_out_list.append(self.dec_fc(dec_out[:, :, i]))
+        pred_pos_rel, _ = self.dec(x_seq)
+        pred_pos_rel = pred_pos_rel.view(B, self.num_samples, 2, self.pred_len).contiguous()
 
-        return (torch.stack(dec_out_list, dim=2), x_enc_out[:, -1, :])
+        return pred_pos_rel
 
-    def get_masked_out(self, recon_y, x_enc_hidden_final):
-        """get_masked_out
-        :: Reconstructed output
-        -> Final hidden layer of input encoder
-        -> Masked output
-
-        The masked out is a the final hidden output from the RNN encoder 1 (for
-        x coordinates where x is the input sequence while y is future sequence to be predicted).
-        """
-        device = recon_y.device
-        masked_out = torch.mul(recon_y, x_enc_hidden_final)
-        masked_out = masked_out.unsqueeze(1)
-        hidden_rnn_dec_input = torch.zeros_like(masked_out)
-        batch_size = masked_out.size(0)
-        hidden_size = masked_out.size(2)
-        final_mask = torch.zeros(
-            batch_size, self.params.rnn_dec_params.n_layers, hidden_size
-        ).to(device)
-        # print("size of masked_out", masked_out.shape)
-        # print("size of final_mask", final_mask.shape)
-
-        final_mask[:, 0, :] = masked_out.squeeze(1)
-        return final_mask
-
-
-if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SGM(SGMParams()).to(device)
-    x = torch.rand(16, 2, 8).to(device)
-    y = torch.rand(16, 2, 12).to(device)
-    pred, last_hidden, means, log_var = model(x, y)
-    model.inference(x)
-    log_var.sum().backward()
-
-
-# x_enc_out, x_enc_hidden = model.SGM.enc_x(x_rel)
-# y_enc_out, y_enc_hidden = model.SGM.enc_y(y_rel)
-
-# recon_y, means, log_var, z = model.SGM.cvae(y_enc_hidden[-1], x_enc_hidden[-1])
-# masked_out = torch.mul(recon_y, x_enc_hidden[-1])
-# masked_out.unsqueeze_(1)
-
-# batch_size = x_enc_hidden.size(1)
-# n_layers = x_enc_hidden.size(0)
-# hidden_size = x_enc_hidden.size(2)
-
-# masked_out = torch.cat((masked_out, torch.zeros(batch_size,
-#                                                 n_layers - 1,
-#                                                 hidden_size)), dim=1)

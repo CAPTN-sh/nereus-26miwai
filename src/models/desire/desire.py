@@ -1,0 +1,50 @@
+import torch.nn as nn
+
+from models.desire.IOC import IOC
+from models.desire.nn.scene_pooling import ScenePoolingCNN
+from models.desire.SGM import SGM
+from models.desire.utils.params import DESIREParams
+
+
+class DESIRE(nn.Module):
+    def __init__(self, params: DESIREParams):
+        super().__init__()
+        self.pred_len = params.pred_len
+        self.num_refine_iters = params.num_refine_iters
+        
+        self.scene_pool = ScenePoolingCNN(params)
+        self.SGM = SGM(params)
+        self.IOC = IOC(params)
+
+    def forward(self, obs_feat, obs_pos_last, obs_pos_rel, fut_pos_rel, seq_start_end, scene, scene_meta):
+        # SGM: sample K hypotheses
+        pred_pos_rel, hidde_obs_enc, mean, log_var = self.SGM(obs_pos_rel, fut_pos_rel)
+
+        scene_feats = self.scene_pool(scene).squeeze(0)
+
+        # IOC: scores + per-step Δ for each hypothesis
+        scores, delta = self.IOC(pred_pos_rel, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats, scene_meta)
+        pred_pos_rel_refined = pred_pos_rel + delta
+
+        return pred_pos_rel, pred_pos_rel_refined, mean, log_var, scores
+
+    def inference(self, obs_feat, obs_pos_last, obs_pos_rel, seq_start_end, scene, scene_meta):
+        # SGM: sample K hypotheses
+        pred_pos_rel, x_ctx = self.SGM.inference(obs_pos_rel)
+
+        scene_feats = self.scene_pool(scene).squeeze(0)
+
+        # IOC: scores + per-step Δ for each hypothesis
+        scores, delta = self.IOC(pred_pos_rel, x_ctx, obs_pos_last, seq_start_end, scene_feats, scene_meta)
+        pred_pos_rel_refined = pred_pos_rel + delta
+
+        for _ in range(self.num_refine_iters):
+            scores, delta = self.IOC(pred_pos_rel_refined, x_ctx, obs_pos_last, seq_start_end, scene_feats, scene_meta)
+            pred_pos_rel_refined = pred_pos_rel_refined + delta
+
+        scores, _ = self.IOC(pred_pos_rel_refined, x_ctx, obs_pos_last, seq_start_end, scene_feats, scene_meta)
+
+        best_idx = scores.argmax(dim=1)
+        pred_pos_rel_best = pred_pos_rel_refined.gather(1, best_idx.view(-1,1,1,1).expand(-1,1,2, self.pred_len))
+
+        return pred_pos_rel_best

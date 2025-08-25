@@ -1,110 +1,42 @@
 import torch
-import torch.nn.functional as F
 
 
-def bce_loss(input, target):
+def soft_ce_with_soft_targets(logits, targets):
     """
-    Numerically stable version of the binary cross-entropy loss function.
-    As per https://github.com/pytorch/pytorch/issues/751
-    See the TensorFlow docs for a derivation of this formula:
-    https://www.tensorflow.org/api_docs/python/tf/nn/sigmoid_cross_entropy_with_logits
-    Input:
-    - input: PyTorch Tensor of shape (N, ) giving scores.
-    - target: PyTorch Tensor of shape (N,) containing 0 and 1 giving targets.
-
-    Output:
-    - A PyTorch Tensor containing the mean BCE loss over the minibatch of
-      input data.
+    logits:  [B,K]
+    targets: [B,K], rows sum to 1 (soft labels)
+    returns scalar CE = -E_q[log p]
     """
-    neg_abs = -input.abs()
-    loss = input.clamp(min=0) - input * target + (1 + neg_abs.exp()).log()
-    return loss
+    log_p = torch.log_softmax(logits, dim=1)
+    return -(targets * log_p).sum(dim=1).mean()
 
 
-def l2_loss(pred_traj, pred_traj_gt, mode='raw'):
-    """
-    Input:
-    - pred_traj: Tensor of shape (seq_len, batch, 2). Predicted trajectory.
-    - pred_traj_gt: Tensor of shape (seq_len, batch, 2). Groud truth
-    predictions.
-    - loss_mask: Tensor of shape (batch, seq_len)
-    - mode: Can be one of sum, average, raw
-    Output:
-    - loss: l2 loss depending on mode
-    """
-    batch, _, seq_len = pred_traj.size()
-    loss = (pred_traj_gt - pred_traj).norm(dim=1)
-    if mode == 'sum':
-        return torch.sum(loss, dim=1)
-    else:
-        return loss
-    # elif mode == 'average':
-    #     return torch.sum(loss) / torch.numel(loss_mask.data)
-    # elif mode == 'raw':
-    #     return loss.sum(dim=2).sum(dim=1)
+def k_total_loss(
+    pred_sgm,          # [B,K,2,T]   raw SGM samples
+    pred_pos_rel_refined,      # [B,K,2,T]   refined = SGM + Δ
+    gt,                # [B,2,T]
+    mean, logvar,      # [B,L]       CVAE posterior stats
+    scores,            # [B,K]       IOC accumulated scores
+):
+    # 1) Reconstruction (SGM): mean L2 over time & K
+    diff_sgm = pred_sgm - gt.unsqueeze(1)           # [B,K,2,T]
+    l2_sgm   = torch.norm(diff_sgm, dim=2)          # [B,K,T] (per-step Euclidean)
+    l_recon  = l2_sgm.mean()
 
+    # 2) KLD for CVAE posterior vs N(0,I)
+    l_kld = (-0.5 * (1 + logvar - mean.pow(2) - logvar.exp())).sum(dim=1).mean()
 
-def kld_loss(mean,
-             log_var):
-    KLD = - 0.5 * torch.sum(1 + log_var - mean.pow(2) - log_var.exp(), dim=1)
-    return KLD
+    # 3) IOC ranking CE with soft targets q = softmax(-max_t L2)
+    with torch.no_grad():
+        d = torch.norm(pred_sgm - gt.unsqueeze(1), dim=2)     # [B,K,T]
+        d_max = d.max(dim=2).values                           # [B,K]
+        q = torch.softmax(-d_max, dim=1)                      # [B,K]
+    l_rank = soft_ce_with_soft_targets(scores, q)
 
+    # 4) Refinement regression: mean L2 of refined trajectories
+    diff_ref = pred_pos_rel_refined - gt.unsqueeze(1)                 # [B,K,2,T]
+    l2_ref   = torch.norm(diff_ref, dim=2)                    # [B,K,T]
+    l_ref    = l2_ref.mean()
 
-def cross_entropy_loss(pred_traj,
-                       pred_traj_gt):
-    d = (pred_traj_gt - pred_traj)
-    return F.softmax(-d.norm(dim=1), dim=0).max(dim=1)[0]
-    
-
-
-
-def reg_loss(pred_traj,
-             pred_delta,
-             pred_traj_gt):
-    assert pred_traj_gt.size() == pred_delta.size()
-    assert pred_traj_gt.size() == pred_traj.size()
-    batch, _, seq_len = pred_traj.size()
-    d = (pred_traj_gt - pred_traj - pred_delta).norm(dim=1)
-    return d.sum(dim=1)
-
-
-# class total_loss(nn.Module):
-#     def __init__(self):
-#         super(total_loss, self).__init__()
-
-#     def forward(pred_traj,
-#                 pred_delta,
-#                 pred_traj_gt,
-#                 mean,
-#                 logvar):
-#         print("Print this from total loss ", pred_traj)
-#         batch, _, seq_len = pred_traj.size()
-#         l2l = l2_loss(pred_traj, pred_traj_gt)
-#         kld = kld_loss(mean, logvar)
-#         cel = cross_entropy_loss(pred_traj, pred_traj_gt)
-#         rl = reg_loss(pred_traj, pred_delta, pred_traj_gt)
-
-#         tloss = (l2l + kld + cel + rl).sum() / batch
-#         return tloss, (l2l, kld, cel, rl)
-
-
-def total_loss(pred_traj,
-               pred_delta,
-               pred_traj_gt,
-               mean,
-               logvar):
-    batch, _, seq_len = pred_traj.size()
-    l2l = l2_loss(pred_traj, pred_traj_gt, mode='sum')
-    kld = kld_loss(mean, logvar)
-    cel = cross_entropy_loss(pred_traj, pred_traj_gt)
-    rl = reg_loss(pred_traj, pred_delta, pred_traj_gt)
-
-    # print(mean.size(),
-    #       l2l.size(),
-    #       kld.size(),
-    #       cel.size(),
-    #       rl.size())
-
-
-    tloss = (l2l + kld + cel + rl)
-    return tloss, (l2l.sum(dim=0), kld.sum(dim=0), cel.sum(dim=0), rl.sum(dim=0))
+    loss = l_recon + l_kld + l_rank + l_ref
+    return loss, (l_recon, l_kld, l_rank, l_ref)

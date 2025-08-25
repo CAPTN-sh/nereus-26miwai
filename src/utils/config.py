@@ -9,7 +9,7 @@ import yaml
 class Config:
     _instance = None
     _lock = threading.Lock()
-    _path = Path("bin/config.yaml").resolve()
+    _path = Path(".bin/config.yaml").resolve()
     _subconfigs = {}
 
     def __new__(cls, path=None):

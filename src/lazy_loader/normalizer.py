@@ -1,29 +1,6 @@
 from typing import Dict
 
 import numpy as np
-import torch
-import torch.nn as nn
-
-
-class TorchCoordsNormalizer(nn.Module):
-    mean: torch.Tensor
-    std: torch.Tensor
-
-    def __init__(self, mean, std):
-        super().__init__()
-        mean = np.asarray(mean, dtype=np.float32).reshape(-1)
-        std = np.asarray(std, dtype=np.float32).reshape(-1)
-
-        std[std == 0] = 1e-8
-
-        self.register_buffer("mean", torch.tensor(mean, dtype=torch.float32))
-        self.register_buffer("std", torch.tensor(std, dtype=torch.float32))
-
-    def normalize_coords(self, coords):
-        return (coords - self.mean) / self.std
-
-    def denormalize_coords(self, coords_norm):
-        return coords_norm * self.std + self.mean
 
 
 class Normalizer:
@@ -47,11 +24,3 @@ class Normalizer:
 
     def normalize(self, values, key):
         return (values - self.stats[key]["mean"]) / self.stats[key]["std"]
-
-    def denormalize(self, values, key):
-        return (values * self.stats[key]["std"]) + self.stats[key]["mean"]
-
-    def to_TorchCoordsNormalizer(self):
-        mean = [self.stats["lat"]["mean"], self.stats["lon"]["mean"]]
-        std = [self.stats["lat"]["std"], self.stats["lon"]["std"]]
-        return TorchCoordsNormalizer(mean, std)

@@ -1,30 +1,41 @@
 import torch
+import torch.nn.functional as F
 
-from lazy_loader.normalizer import TorchCoordsNormalizer
 
-
-def get_scene(scene, ypred, scene_size, normalizer: TorchCoordsNormalizer):
-    """get_scene
-    input
-    =====
-    scene: (x, W/2, H/2, x)
-    ypred: (x, y) where x, y are floats
-    output:
+def sample_scene_features(scene_feats, pred_pos_abs, pos_to_px, feature_stride):
     """
+    rho_I:         [C, Hf, Wf] scene CNN feature map ρ(I)
+    y_world_m:     [B, 2] agent positions (meters, same UTM as your BEV)
+    world_to_bev:  3x3 numpy/torch array mapping [x_m,y_m,1] -> [u_px,v_px,1] in BEV pixels
+    feature_stride:int total downsample from BEV -> ρ(I) (e.g., 2 if conv1 stride=2)
+    returns:       [B, C] pooled features at each agent location (bilinear)
+    """
+    device = scene_feats.device
+    if not torch.is_tensor(pos_to_px):
+        pos_to_px = torch.tensor(pos_to_px, dtype=torch.float32, device=device)
+    B = pred_pos_abs.shape[0]
+    C, Hf, Wf = scene_feats.shape
 
-    width = scene_size[0]
-    height = scene_size[1]
-    shrinkage = scene_size[2]
+    # world(m) -> BEV pixels
+    ones = torch.ones(B, 1, device=device)
+    pos1 = torch.cat([pred_pos_abs, ones], dim=1).t()                        # [3,B]
+    uv1 = pos_to_px.to(device) @ pos1                                  # [3,B]
 
-    # TODO range in setting/config
-    lat_min, lat_max = 54.31, 54.46
-    lon_min, lon_max = 10.13, 10.32
+    # BEV pixels -> feature pixels
+    u_f = uv1[0] / float(feature_stride)
+    v_f = uv1[1] / float(feature_stride)
 
-    lat, lon = normalizer.denormalize_coords(ypred).T
+    # normalize to [-1,1] for grid_sample
+    Wn = max(Wf - 1, 1)
+    Hn = max(Hf - 1, 1)
+    x_norm = 2.0 * (u_f / Wn) - 1.0
+    y_norm = 2.0 * (v_f / Hn) - 1.0
+    grid = torch.stack([x_norm, y_norm], dim=1).view(1, 1, B, 2)         # [1,1,B,2]
 
-    x_px = (((lon - lon_min) / (lon_max - lon_min)) * width).long()
-    y_px = (((lat_max - lat) / (lat_max - lat_min)) * height).long()
+    outside = ((x_norm < -1) | (x_norm > 1) | (y_norm < -1) | (y_norm > 1)).float().mean().item()
+    print(f"{outside*100:.1f}% points fall outside the feature map (will sample zeros).")
 
-    x_shrunk = torch.clamp(x_px // shrinkage, 0, scene.shape[1] - 1)
-    y_shrunk = torch.clamp(y_px // shrinkage, 0, scene.shape[2] - 1)
-    return scene[:, y_shrunk, x_shrunk].transpose(0, 1)
+    # grid_sample wants [N,C,H,W], so add batch dim
+    feat = F.grid_sample(scene_feats.unsqueeze(0), grid, align_corners=True)   # [1,C,1,B]
+    feat = feat.squeeze(0).squeeze(1).transpose(0,1).contiguous()        # [B,C]
+    return feat

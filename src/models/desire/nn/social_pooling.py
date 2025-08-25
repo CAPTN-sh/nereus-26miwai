@@ -1,95 +1,67 @@
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch_scatter as ts
 
-from models.desire.utils.params import SocialPoolingParams
-
-
-def ring_indices(ydash, params: SocialPoolingParams):
-    ''' Returns the ring indices of each id given an id'''
-
-    with torch.no_grad():
-        num_rings = params.num_rings
-        num_wedges = params.num_wedges
-        rmin = params.rmin
-        rmax = params.rmax
-        rmax_by_rmin = params.rmax_by_rmin
-
-        r = torch.norm(ydash[:, None] - ydash, dim=2, p=2)
-
-        ring_ids = torch.ceil((num_rings-1) * (torch.log(r / rmin) /
-                                               rmax_by_rmin))
-        ring_ids[ring_ids == -float("Inf")] = 0
-        ring_ids = ring_ids.long()
-        x_diff = (ydash[:, 0] - ydash[:, 0, None])
-        y_diff = (ydash[:, 1] - ydash[:, 1, None])
-
-        theta = torch.atan2(y_diff, x_diff)
-        wedge_ids = theta * num_wedges / (2 * np.pi)
-        wedge_ids = (wedge_ids + (num_wedges // 2 - 1)).long()
-
-        final_index = (ring_ids * num_wedges + wedge_ids)
-        final_index[final_index < params.num_wedges] = 0
-        final_index[final_index >= params.num_wedges ** 2] = 0
-
-    return final_index.long()
-
-
-
-def scatter_hidden(hidden, pool_indices, params: SocialPoolingParams):
-    '''
-    scatter_hidden :: hidden -> pool_indices -> SocialPoolingParams -> pooled_hidden_layers
-    hidden :: #Agents -> hidden_size
-    pool_indices::  #Agents -> #Agents -> Distance
-
-    - Hidden layer contains the hidden layers of every agent.
-    - pool_indices contains info into which (ring_id x wedge_id) hidden layers of neighoring pixels go into.
-
-    '''
-
-    batch_size, hidden_size = hidden.size()
-
-    out = torch.zeros(batch_size, params.num_wedges * params.num_rings * 48, device=hidden.device)
-    for cnt, idx in enumerate(pool_indices):
-        hidden_per_agent = ts.scatter_mean(hidden, idx.long(), 0, dim_size=((params.num_wedges + 1) * params.num_rings))
-        out[cnt, :] = hidden_per_agent[params.num_wedges:, :].flatten()
-
-    return out
+from models.desire.utils.params import DESIREParams
 
 
 class SocialPool(nn.Module):
 
-    def __init__(self, idx, params):
+    def __init__(self, params: DESIREParams):
         super(SocialPool, self).__init__()
-        self.params = params
-        self.fc = nn.Linear(*params.fc_config[0:2])
         self.hidden_size = params.hidden_size
+        self.num_rings = params.num_rings
+        self.num_wedges = params.num_wedges
+        self.input_size = self.num_wedges * self.num_rings * self.hidden_size
 
-    def forward(self, y_pred, x_start, hidden, seq_start_end=None):
-        device = x_start.device
-        TOTAL_BATCH_SIZE, _ = y_pred.size()
-        HIDDEN_SIZE = hidden.size(1)
+        self.register_buffer("rmin",   torch.tensor(float(params.rmin)))
+        self.register_buffer("rmax",   torch.tensor(float(params.rmax)))
+        self.register_buffer("two_pi", torch.tensor(2.0 * torch.pi))
 
-        if seq_start_end is None:
-            seq_start_end = ((0, y_pred.size(0)),)
+        self.fc = nn.Linear(self.input_size, self.hidden_size)
 
-        log_polar_hidden = torch.zeros(TOTAL_BATCH_SIZE,
-                                       self.params.num_rings,
-                                       self.params.num_wedges,
-                                       HIDDEN_SIZE).to(device)
+    def forward(self, y_pred, hidden, seq_start_end):
+        device = y_pred.device
+        batch_size, _ = y_pred.size()
+        out = torch.zeros(batch_size, self.input_size, device=device)
+        num_bins = 1 + self.num_rings * self.num_wedges
 
-
-        out = torch.zeros(TOTAL_BATCH_SIZE, (self.params.num_wedges *
-                                             self.params.num_rings *
-                                             self.params.hidden_size), device=device)
         for (start, end) in seq_start_end:
+            seq_size = end-start
 
-            pool_indices = ring_indices(y_pred[start:end],
-                                        self.params)
-            out[start:end, :] = scatter_hidden(hidden[start:end], pool_indices, self.params)
+            bin_ids = self.bin_indices(y_pred[start:end])
+            agent_offset = torch.arange(seq_size, device=device).view(seq_size, 1) * num_bins
+            global_idx = (bin_ids + agent_offset).reshape(-1)
+
+            hidden_seq = hidden[start:end].repeat(seq_size, 1)
+            pooled = ts.scatter_mean(hidden_seq, global_idx, dim=0, dim_size= seq_size * num_bins)
+            
+            without_dummy = pooled.view(seq_size, num_bins, self.hidden_size)[:, 1:, :]
+            out[start:end, :] = without_dummy.reshape(seq_size, self.input_size)
 
         return F.relu(self.fc(out))
+    
 
+    def bin_indices(self, ydash):
+        """Compute (ring, wedge) bin indices for all agent pairs in one scene."""
 
+        with torch.no_grad():
+            r = torch.norm(ydash[:, None] - ydash, dim=2, p=2)
+
+            r_normed = (torch.log(r/self.rmin) / torch.log(self.rmax/self.rmin))
+            ring_ids = torch.ceil(self.num_rings * r_normed).long().clamp(0, self.num_rings - 1)
+
+            x_dist = (ydash[:, 0] - ydash[:, 0, None])
+            y_dist = (ydash[:, 1] - ydash[:, 1, None])
+            theta = torch.atan2(y_dist, x_dist)
+            theta_normed = torch.remainder(theta, self.two_pi) / (self.two_pi)
+            wedge_ids = torch.floor(self.num_wedges * theta_normed).long()
+            
+            mask_self = torch.eye(r.size(0), dtype=torch.bool, device=r.device)
+            mask_outside = (r >= self.rmax)
+
+            final_index = 1 + ring_ids * self.num_wedges + wedge_ids
+            final_index[mask_self | mask_outside] = 0
+
+        return final_index

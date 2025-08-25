@@ -12,7 +12,7 @@ def drop_duplicates(df):
 
 
 def to_GeoDataFrame(df, index=None):
-    df["geometry"] = [Point(xy) for xy in zip(df["lon"], df["lat"])]
+    df["geometry"] = [Point(pos) for pos in zip(df["lon"], df["lat"])]
     gdf = gpd.GeoDataFrame(df)
     gdf.set_geometry("geometry", inplace=True)
     gdf.set_crs("epsg:4326", inplace=True)

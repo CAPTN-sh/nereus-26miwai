@@ -1,16 +1,17 @@
+import os
+import sys
+
+import contextily as cx
+import geopandas as gpd
 import matplotlib.pyplot as plt
 import pandas as pd
-import geopandas as gpd
-import contextily as cx
-import sys
-import os
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 src_path = os.path.join(project_root, "src")
 sys.path.insert(0, src_path)
 
-from utils.map_loader import MapLoader
 from utils.config import Config
+from utils.map_loader import MapLoader
 
 DEFAULT_CRS = "EPSG:4326"
 PLOT_CRS = "EPSG:3857"
@@ -27,7 +28,7 @@ if __name__ == "__main__":
     df_traj = pd.concat([pd.read_parquet(path, engine="pyarrow") for path in paths])
     df_traj = gpd.GeoDataFrame(
         df_traj,
-        geometry=gpd.points_from_xy(df_traj["lon"], df_traj["lat"]),
+        geometry=gpd.points_from_pos(df_traj["lon"], df_traj["lat"]),
         crs=DEFAULT_CRS,
     )
     df_traj = df_traj[df_traj["geometry"].within(maps.get_layer("water").geometry)]

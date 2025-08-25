@@ -1,110 +1,53 @@
-"""This contains the IOC related modules"""
-
 import torch
 import torch.nn as nn
 
-from lazy_loader.normalizer import TorchCoordsNormalizer
 from models.desire.nn.scf import SCF
-from models.desire.nn.scene_pooling import ScenePoolingCNN
-from models.desire.utils.params import IOCParams
-from models.desire.utils.seq_net import get_fc_act
+from models.desire.utils.params import DESIREParams
+
 
 class IOC(nn.Module):
-    def __init__(self, params: IOCParams, normalizer: TorchCoordsNormalizer):
-        super(IOC, self).__init__()
-        self.params = params
+    """
+    K-hypothesis IOC:
+      - scene features from CNN (HWC) + social pooling via SCF
+      - per-step scoring RNN over SCF features
+      - accumulated score per hypothesis [B,K]
+      - single refinement Δ from last hidden [B,K,2,T]
+    """
+    def __init__(self, params: DESIREParams):
+        super().__init__()
+        _h = params.hidden_size
+        _out = params.pred_dim * params.pred_len
+        _scf_out = params.hidden_size + params.intermediate_size + params.out_channels
 
-        self.scfs = []
-        self.grus = []
-        self.scoring_fcs = []
+        self.scf = SCF(params)
+        self.gru_cell = nn.GRUCell(_scf_out, _h)
+        self.score_fc = nn.Linear(_h, 1)
+        self.delta_fc = nn.Linear(_h, _out)
 
-        self.grus = nn.ModuleList(
-            [nn.GRU(**params.gru_params) for i in range(params.num_layers)]
-        )
-        self.scfs = nn.ModuleList(
-            [SCF(i, params.scf_params, normalizer) for i in range(params.num_layers)]
-        )
-        self.scoring_fcs = nn.ModuleList(
-            [get_fc_act(params.scoring_fc) for i in range(params.num_layers)]
-        )
+    def forward(self, pred_pos_rel, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats, scene_meta):
+        # pred_traj_rel: [B,K,2,T]; prev_hidden: [B,Hx]; obs_pos_t0/obs_last: [B,2]
+        device = pred_pos_rel.device
+        B, K, C, T = pred_pos_rel.shape
 
-        self.last_hidden_to_delta = nn.Linear(
-            params.gru_params["hidden_size"], (params.num_layers * params.num_dims)
-        )
+        # expand over the K samples
+        obs_pos_last = obs_pos_last[:, None, :].expand(-1, K, -1).reshape(B * K, C).unsqueeze(-1)
+        seq_start_end = (seq_start_end * K).to(device).long()
+        h = hidde_obs_enc[:, None, :].expand(-1, K, -1).reshape(B * K, -1)
+        
+        # build absolute coords
+        pred_pos_rel = pred_pos_rel.reshape(B * K, C, T)
+        pred_pos_abs = obs_pos_last + pred_pos_rel.cumsum(dim=-1)
+        
+        acc_scores = torch.zeros(B*K, device=device)
 
-        self.scene_pooling_cnn = ScenePoolingCNN()
+        for t in range(T):
+            pa_t = pred_pos_abs[:, :, t]
+            pr_t = pred_pos_rel[:, :, t]
 
-    def forward(
-        self,
-        pred_traj_rel,
-        prev_hidden,
-        scene,
-        x_start,
-        obs_traj_rel_cum_last,
-        seq_start_end=None,
-    ):
-        # Since the output is relative, it is already a velocity.
-        velocity = pred_traj_rel
+            scf_t = self.scf(h, pa_t, pr_t, seq_start_end, scene_feats, scene_meta)
+            h = self.gru_cell(scf_t, h)
+            acc_scores = acc_scores + self.score_fc(h).squeeze(-1)
 
-        prev_hidden = prev_hidden.unsqueeze(0)
-        out_scores = []
-        scene = self.scene_pooling_cnn(scene).squeeze(0)
-        # Here, calculate the absolute trajectory. You need the obs_traj's last
-        # value so as to calculate the absolute required patth which shall b
-        pred_traj_abs = (
-            x_start.unsqueeze(2)
-            + torch.cat(
-                (obs_traj_rel_cum_last.unsqueeze(-1), pred_traj_rel), dim=2
-            ).cumsum(dim=2)[:, :, 1:]
-        )
-        pred_traj_abs = pred_traj_abs.detach()
-
-        prev_hidden = prev_hidden.clone()
-        for i in range(self.params.num_layers):
-            prev_hidden.squeeze_(0)
-            # print ("prev_hidden shape", prev_hidden.shape,
-            #        pred_traj_rel.shape,
-            #        velocity.shape,
-            #        scene.shape,
-            #        x_start.shape)
-
-            # print("prev_hidden", prev_hidden.get_device())
-            # print("pred_traj_rel", pred_traj_rel.get_device())
-            # print("velocity", velocity.get_device())
-            # print("scene", scene.get_device())
-            # print("x_start", x_start.get_device())
-
-            scf_out = self.scfs[i](
-                prev_hidden,
-                pred_traj_abs[:, :, i],
-                pred_traj_rel[:, :, i],
-                velocity[:, :, i],
-                scene,
-                x_start,
-                seq_start_end,
-            )
-            # print("scf_out", scf_out.get_device())
-            # print("scf dimensions", scf_out.size())
-            gru_out, prev_hidden = self.grus[0](
-                scf_out.unsqueeze(1), prev_hidden.unsqueeze(0)
-            )
-            # print("gru_out shape", gru_out.shape)
-            out_scores.append(self.scoring_fcs[0](gru_out.squeeze(1)))
-
-        # print(prev_hidden.squeeze(0).shape)
-        return (
-            out_scores,
-            self.last_hidden_to_delta(prev_hidden.squeeze(0)).view(
-                -1, self.params.num_dims, self.params.num_layers
-            ),
-        )
-
-
-if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = IOC(IOCParams()).to(device)
-    prev_hidden = torch.randn(16, 48).to(device)
-    ypred = torch.randn(16, 2, 40).to(device)
-    scene = torch.randn(1, 3, 640, 480).to(device)
-    x_start = torch.rand(16, 2).to(device)
-    out_scores, prev_hidden = model(ypred, prev_hidden, scene, x_start)
+        acc_scores = acc_scores.view(B, K)
+        pred_delta = self.delta_fc(h).view(B, K, C, T)
+        return acc_scores, pred_delta
