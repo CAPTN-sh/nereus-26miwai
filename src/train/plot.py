@@ -12,7 +12,7 @@ def plot_traj(
     pred_pos,
     seq_start_end,
 ):
-    
+
     fig, ax = plt.subplots(figsize=(50, 50))
 
     map_path = Path("data/kiel/maps/kiel_districts.geojson")
@@ -49,5 +49,5 @@ def plot_traj(
     ax.set_ylabel("Northing (m)")
     ax.set_title("AIS Positions (EPSG:32632)")
     ax.grid(True, linestyle=":", linewidth=0.7, alpha=0.6)
-    plt.savefig(f"prediction_{file_name}.png")
+    plt.savefig(f"images/{file_name}.png")
     plt.close()

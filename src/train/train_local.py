@@ -9,7 +9,7 @@ import torch.optim as optim
 from tqdm import tqdm
 
 from lazy_loader.loader import lazy_loader
-from models.desire.desire import DESIRE
+from models.desire.model import DESIRE
 from models.desire.nn.loss import k_total_loss
 from models.desire.utils.params import DESIREParams
 from train.eval import eval
@@ -66,7 +66,9 @@ def train_cpu(
 
     # --- Optimizer ---
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=num_epochs // 4, gamma=0.5)
+    scheduler = optim.lr_scheduler.StepLR(
+        optimizer, step_size=num_epochs // 4, gamma=0.5
+    )
 
     # --- Train ---
     for epoch in range(num_epochs):

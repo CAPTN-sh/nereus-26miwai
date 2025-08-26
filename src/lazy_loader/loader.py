@@ -15,6 +15,7 @@ def lazy_loader(
     rank: int,
     batch_size: int,
     feat_cols=[],
+    max_neighbors = 10,
     pin_memory=True,
 ):
 
@@ -24,6 +25,7 @@ def lazy_loader(
         min_date=min_date,
         max_date=max_date,
         feat_cols=feat_cols,
+        max_neighbors=max_neighbors
     )
 
     sampler = DistributedSampler(dset, num_replicas=world_size, rank=rank, shuffle=True)

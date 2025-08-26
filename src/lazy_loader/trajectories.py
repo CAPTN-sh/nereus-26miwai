@@ -139,9 +139,8 @@ class LazyTrajectoryDataset(Dataset):
         feat_cols=[],
         obs_len=8,
         pred_len=12,
-        max_vessels=10,
+        max_neighbors=10,
         exclude_ship_types=list(range(0, 40)),
-        num_workers=8,
     ):
         """
         Args:
@@ -185,7 +184,7 @@ class LazyTrajectoryDataset(Dataset):
 
         for cur_t in tqdm(range(nodes.index[0], nodes.index[-1])):
             self._add_items_at_t(
-                nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_vessels
+                nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_neighbors
             )
 
         for mmsi, group in tqdm(nodes.groupby("mmsi")):
@@ -193,7 +192,7 @@ class LazyTrajectoryDataset(Dataset):
             df = add_rel_pos(df)
             self.data[mmsi] = df
 
-    def _add_items_at_t(self, nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_vessels):
+    def _add_items_at_t(self, nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_neighbors):
         nodes_t = nodes.loc[cur_t - self.obs_len : cur_t + self.pred_len - 1]
         if nodes_t.empty:
             return
@@ -211,8 +210,8 @@ class LazyTrajectoryDataset(Dataset):
         for mmsi in full_traj_mmsi:
             others = mmsis_in_frame.get((cur_t - 1, mmsi), [])
             others = [o for o in others if o in valid_mmsi]
-            if max_vessels is not None:
-                others = others[:max_vessels]
+            if max_neighbors is not None:
+                others = others[:max_neighbors]
             self.items.append((cur_t, mmsi, others))
 
     def __len__(self):

@@ -19,3 +19,4 @@ playground/
 environment.yml#
 Makefile
 _version.py
+.flake8
