@@ -1,13 +1,21 @@
+# generated files
 *.png
 *.pth
 *nmea.txt
 *parquet
 
-__pycache__
-.bin
-weights
-.history
-
-!scene_encoded.png
+# generated files to keep
 !data/kiel/ais/2_decoded/ship_info.parquet
 !data/kiel/ais/2_decoded/ship_info_crawler.parquet
+
+# hidden folders and cache
+.*
+__pycache__
+playground/
+
+# build files
+*.egg-info/
+.markdownlint.json
+environment.yml#
+Makefile
+_version.py
