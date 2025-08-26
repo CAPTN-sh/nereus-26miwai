@@ -32,9 +32,11 @@ def lazy_loader(
         dset,
         batch_size=batch_size,
         sampler=sampler,
-        num_workers=8,
+        num_workers=4,
         collate_fn=seq_collate,
         pin_memory=pin_memory,
+        prefetch_factor=4,
+        persistent_workers=True,
         drop_last=True,
     )
     return dset, sampler, loader

@@ -9,31 +9,28 @@ def plot_traj(
     file_name,
     obs_pos,
     fut_pos,
-    pred_pos_rel,
+    pred_pos,
     seq_start_end,
 ):
     
-    fig, ax = plt.subplots(figsize=(10, 10))
+    fig, ax = plt.subplots(figsize=(50, 50))
 
     map_path = Path("data/kiel/maps/kiel_districts.geojson")
     background = gpd.read_file(map_path).to_crs("EPSG:32632")
     background.plot(ax=ax, facecolor="lightgray", edgecolor="black", alpha=0.5)
 
-    start_abs = obs_pos[:, :, -1].unsqueeze(2)
-    y_pred_abs = start_abs + pred_pos_rel.cumsum(dim=2)
-
     def plot_trajectories(ax, traj, i, color):
         traj_i = traj[i].detach().permute(1, 0).cpu()
         xs = traj_i[:, 0].numpy()
         ys = traj_i[:, 1].numpy()
-        ax.scatter(xs, ys, color=color, alpha=0.4, s=2)
+        ax.scatter(xs, ys, color=color, alpha=0.7, s=2)
 
     for i, (s, e) in enumerate(seq_start_end):
         if i > 5:
             break
         plot_trajectories(ax, obs_pos, s, color="blue")
         plot_trajectories(ax, fut_pos, s, color="green")
-        plot_trajectories(ax, y_pred_abs, s, color="red")
+        plot_trajectories(ax, pred_pos, s, color="red")
 
     legend_elements = [
         Line2D([0], [0], color="blue", label="Observed"),

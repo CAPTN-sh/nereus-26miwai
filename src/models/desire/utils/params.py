@@ -8,7 +8,7 @@ class DESIREParams:
     # general
     pred_dim: int = 2
     pred_len: int = 12
-    num_refine_iters: int = 4
+    num_refine_iters: int = 2
 
     hidden_size: int = 48
     intermediate_size: int = 16

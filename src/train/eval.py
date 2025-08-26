@@ -3,6 +3,7 @@ import torch.distributed as dist
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from torch import amp
 
 from train.plot import plot_traj
 
@@ -13,10 +14,11 @@ def eval(plot_name, model: nn.Module, eval_loader: DataLoader, device, scene, sc
 
     model.eval()
 
-    num_traj = 0
-    ade_sum = 0.0
-    fde_sum = 0.0
-    l2max_sum = 0.0
+    num_traj = torch.tensor(0.0, device=device)
+    ade_sum  = torch.tensor(0.0, device=device)
+    fde_sum  = torch.tensor(0.0, device=device)
+    l2max_sum = torch.tensor(0.0, device=device)
+
     
     plot_cached = None
 
@@ -27,16 +29,22 @@ def eval(plot_name, model: nn.Module, eval_loader: DataLoader, device, scene, sc
             ]
             obs_pos_last = obs_pos[:, :, -1]
 
-            #with amp.autocast(device_type="cuda"):
-            pred_pos_rel_best = model.inference(
-                obs_feat, obs_pos_last, obs_pos_rel, seq_start_end, scene, scene_meta
-            )
-            pred_pos_rel_best = pred_pos_rel_best.squeeze(1)
+            with amp.autocast(device_type="cuda"):
+                pred_pos_rel_best = model.inference(
+                    obs_feat, obs_pos_last, obs_pos_rel, seq_start_end, scene, scene_meta
+                )
+                pred_pos_rel_best = pred_pos_rel_best.squeeze(1)
 
-            diff = pred_pos_rel_best - fut_pos_rel
-            l2_per_t = torch.norm(diff, dim=1)
+                first_indices = []
+                for start, end in seq_start_end:
+                    first_indices.append(start.item())
+                first_indices = torch.tensor(first_indices, device=device)
 
-            num_traj += l2_per_t.size(0)
+                diff = (pred_pos_rel_best - fut_pos_rel)[first_indices]
+                l2_per_t = torch.norm(diff, dim=1)
+
+                num_traj += l2_per_t.size(0)
+
 
             ade_sum += l2_per_t.sum().item()
             fde_sum += l2_per_t[:, -1].sum().item()
@@ -57,7 +65,7 @@ def eval(plot_name, model: nn.Module, eval_loader: DataLoader, device, scene, sc
         dist.all_reduce(num_traj, op=dist.ReduceOp.SUM)
 
 
-    ade = ade_sum / num_traj * 12
+    ade = ade_sum / (num_traj * 12)
     fde = fde_sum / num_traj
     l2_maxT = l2max_sum / num_traj
 
@@ -65,6 +73,7 @@ def eval(plot_name, model: nn.Module, eval_loader: DataLoader, device, scene, sc
         print(f"[Eval] ADE: {ade:.4f}, FDE: {fde:.4f}, l2_maxT: {l2_maxT:.4f}")
 
         obs_pos, fut_pos, pred_pos_rel_best, seq_start_end = plot_cached
-        plot_traj(plot_name, obs_pos, fut_pos, pred_pos_rel_best, seq_start_end)
+        pred_pos = obs_pos[:, :, -1].unsqueeze(2) + pred_pos_rel_best.cumsum(dim=2)
+        plot_traj(plot_name, obs_pos, fut_pos, pred_pos, seq_start_end)
 
     model.train()
