@@ -9,9 +9,6 @@ import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-logger = logging.getLogger(__name__)
-
-
 def seq_collate(data):
     (obs_feat_seq, obs_pos_seq, obs_pos_rel_seq, fut_pos_seq, fut_pos_rel_seq) = zip(*data)
 

@@ -19,7 +19,7 @@ class DESIREParams:
 
     # sgm
     latent_size: int = 48
-    num_samples: int = 50
+    num_samples: int = 8
 
     # social pooling
     num_rings: int = 6

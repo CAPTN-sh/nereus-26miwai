@@ -31,9 +31,10 @@ def train_worker(
     scene_path: Path,
     scene_meta_path: Path,
     batch_size: int = 128,
-    num_epochs: int = 50,
+    num_epochs: int = 30,
     norm_clip_value: float = 1.0,
     lr: float = 4e-3,
+    max_neighbors = 10
 ):
     ### --- DDP Setup --- ###
     rank, world_size, local_rank = dist_args
@@ -51,6 +52,7 @@ def train_worker(
         rank=rank,
         batch_size=batch_size,
         pin_memory=True,
+        max_neighbors=max_neighbors,
     )
 
     eval_dset, eval_sampler, eval_loader = lazy_loader(
@@ -61,13 +63,14 @@ def train_worker(
         rank=rank,
         batch_size=batch_size,
         pin_memory=True,
+        max_neighbors=max_neighbors,
     )
 
     if rank == 0:
-        logging.info[f"[Train] model: {model.__class__.__name__}"]
-        logging.info("additional features:", train_dset.feature_cols)
-        logging.info("There are {} traj loaded for training".format(len(train_dset)))
-        logging.info("There are {} traj loaded for evaluation".format(len(eval_dset)))
+        logging.info(f"[Train] model: {model.__class__.__name__}")
+        logging.info(f"additional features: {train_dset.feature_cols}")
+        logging.info(f"There are {len(train_dset)} traj loaded for training")
+        logging.info(f"There are {len(eval_dset)} traj loaded for evaluation")
 
     ### --- Model --- ###
 
@@ -103,7 +106,7 @@ def train_worker(
 
             with amp.autocast(device_type="cuda"):
                 output = model(batch, scene, scene_meta)
-                loss, loss_dict = loss_fn(output, batch)
+                loss, loss_dict = loss_fn(output, batch, epoch)
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -153,7 +156,7 @@ if __name__ == "__main__":
     data_folder = Path("/home/bbiesenbach/data/kiel/ais/3_features")
     scene_path = Path("data/kiel/scenes/bev.npz")
     scene_meta_path = Path("data/kiel/scenes/bev_meta.json")
-
+    
     model = LSTMModel()
     loss_fn = eval_loss
 
@@ -164,8 +167,10 @@ if __name__ == "__main__":
         data_folder=data_folder,
         scene_path=scene_path,
         scene_meta_path=scene_meta_path,
+        max_neighbors = 0
     )
 
+    """
     model = DESIRE(DESIREParams())
     loss_fn = loss_desire
 
@@ -176,4 +181,8 @@ if __name__ == "__main__":
         data_folder=data_folder,
         scene_path=scene_path,
         scene_meta_path=scene_meta_path,
+        max_neighbors = 10,
+        num_epochs = 60
     )
+    """
+

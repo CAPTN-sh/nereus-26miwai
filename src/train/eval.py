@@ -9,7 +9,7 @@ from tqdm import tqdm
 from train.plot import plot_traj
 
 
-def eval_loss(pred_pos_rel, batch):
+def eval_loss(pred_pos_rel, batch, epoch=None):
     _, _, _, _, fut_pos_rel, seq_start_end = batch
     ego_vessels = seq_start_end[:, 0]
     diff = (pred_pos_rel - fut_pos_rel)[ego_vessels]

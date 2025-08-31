@@ -36,7 +36,12 @@ class DESIRE(nn.Module):
         )
         pred_pos_rel_refined = pred_pos_rel + delta
 
-        return pred_pos_rel, pred_pos_rel_refined, mean, log_var, scores
+        best_idx = scores.argmax(dim=1)
+        pred_pos_rel_best = pred_pos_rel_refined.gather(
+            1, best_idx.view(-1, 1, 1, 1).expand(-1, 1, 2, self.pred_len)
+        ).squeeze(1)
+
+        return pred_pos_rel_best, pred_pos_rel, pred_pos_rel_refined, mean, log_var, scores
 
     def inference(self, batch, scene, scene_meta):
         obs_feat, obs_pos, obs_pos_rel, fut_pos, fut_pos_rel, seq_start_end = batch

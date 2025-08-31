@@ -19,8 +19,8 @@ def eval_spline(data_folder: Path):
 
     eval_dset, eval_sampler, eval_loader = lazy_loader(
         data_folder=data_folder,
-        min_date=pd.Timestamp("2023-05-05"),
-        max_date=pd.Timestamp("2023-05-05"),
+        min_date=pd.Timestamp("2022-06-01"),
+        max_date=pd.Timestamp("2022-06-01"),
         world_size=1,
         rank=0,
         batch_size=256,
@@ -43,9 +43,9 @@ def eval_spline(data_folder: Path):
         t_y = np.arange(obs_len, obs_len + fut_len)
 
         spline = PchipInterpolator(t_x, obs_pos_rel, axis=2, extrapolate=True)
-        pred_pos = torch.as_tensor(spline(t_y), dtype=fut_pos.dtype)
+        pred_pos_rel = torch.as_tensor(spline(t_y), dtype=fut_pos.dtype)
 
-        loss, loss_dict = eval_loss(pred_pos, batch)
+        loss, loss_dict = eval_loss(pred_pos_rel, batch)
 
         num_batches += 1
         loss_sum += loss.item()
@@ -61,10 +61,11 @@ def eval_spline(data_folder: Path):
     logging.info(
         f"[Eval] loss: {loss:.4f}, ADE: {ade:.4f}, FDE: {fde:.4f}, l2_max: {l2max:.4f}"
     )
+    pred_pos = obs_pos[:, :, -1].unsqueeze(2) + pred_pos_rel.cumsum(dim=2)
     plot_traj("prediction_spline", obs_pos, fut_pos, pred_pos, seq_start_end)
 
 
 if __name__ == "__main__":
     logger(file_prefix="spline_server")
-    data_folder = Path("./data/kiel/ais/3_features")
+    data_folder = Path("/home/bbiesenbach/data/kiel/ais/3_features")
     eval_spline(data_folder)

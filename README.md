@@ -10,7 +10,7 @@ export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu124"
 export PIP_FIND_LINKS="https://data.pyg.org/whl/torch-2.5.1+cu124.html"
 pip install -e .
 
-torchrun --standalone --nproc_per_node=4 --master_port=29515 src/train/train_desire.py
+torchrun --standalone --nproc_per_node=4 --master_port=29515 src/train/train_server.py
 
 ## Structure
 The project is structured in a way that allows for easy addition of new pipelines and tasks. 

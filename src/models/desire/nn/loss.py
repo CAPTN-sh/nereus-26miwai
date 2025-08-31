@@ -11,8 +11,8 @@ def soft_ce_with_soft_targets(logits, targets):
     return -(targets * log_p).sum(dim=1).mean()
 
 
-def loss_desire(output, batch):
-    pred_pos_rel, pred_pos_rel_refined, mean, log_var, scores = output
+def loss_desire(output, batch, epoch):
+    pred_pos_rel_best, pred_pos_rel, pred_pos_rel_refined, mean, log_var, scores = output
     obs_feat, obs_pos, obs_pos_rel, fut_pos, fut_pos_rel, seq_start_end = batch
 
     # 1) Reconstruction (SGM): mean L2 over time & K
@@ -35,5 +35,6 @@ def loss_desire(output, batch):
     l2_ref = torch.norm(diff_ref, dim=2)  # [B,K,T]
     l_ref = l2_ref.mean()
 
-    loss = l_recon + l_kld + l_rank + l_ref
+    beta = min(1.0, (epoch + 1) / 8)
+    loss = l_recon + beta * l_kld + l_rank + l_ref
     return loss, {"l_recon": l_recon, "l_kld": l_kld, "l_rank": l_rank, "l_ref": l_ref}
