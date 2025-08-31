@@ -34,7 +34,7 @@ def train_worker(
     num_epochs: int = 30,
     norm_clip_value: float = 1.0,
     lr: float = 4e-3,
-    max_neighbors = 10
+    max_neighbors=10,
 ):
     ### --- DDP Setup --- ###
     rank, world_size, local_rank = dist_args
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     data_folder = Path("/home/bbiesenbach/data/kiel/ais/3_features")
     scene_path = Path("data/kiel/scenes/bev.npz")
     scene_meta_path = Path("data/kiel/scenes/bev_meta.json")
-    
+
     model = LSTMModel()
     loss_fn = eval_loss
 
@@ -167,10 +167,9 @@ if __name__ == "__main__":
         data_folder=data_folder,
         scene_path=scene_path,
         scene_meta_path=scene_meta_path,
-        max_neighbors = 0
+        max_neighbors=0,
     )
 
-    """
     model = DESIRE(DESIREParams())
     loss_fn = loss_desire
 
@@ -181,8 +180,6 @@ if __name__ == "__main__":
         data_folder=data_folder,
         scene_path=scene_path,
         scene_meta_path=scene_meta_path,
-        max_neighbors = 10,
-        num_epochs = 60
+        max_neighbors=10,
+        num_epochs=60,
     )
-    """
-

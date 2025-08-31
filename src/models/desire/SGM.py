@@ -12,6 +12,7 @@ class SGM(nn.Module):
 
     3.1. Diverse Sample Generation with CVAE
     """
+
     def __init__(self, params: DESIREParams):
         super().__init__()
         self.pred_len = params.pred_len
@@ -26,8 +27,6 @@ class SGM(nn.Module):
         self.beta_fc = nn.Linear(self.latent_size, self.hidden_size, bias=True)
 
         self.dec = RNNDecoder(params)
-        self.dec_to_pos = nn.Linear(self.hidden_size, params.pred_dim)
-        self.pos_to_dec = nn.Linear(params.pred_dim, self.hidden_size)
 
     def forward(self, obs_pos_rel: torch.Tensor, fut_pos_rel: torch.Tensor):
         device = obs_pos_rel.device
@@ -54,23 +53,28 @@ class SGM(nn.Module):
         hidde_obs_enc = self.enc_obs(obs_pos_rel)[1][-1]
 
         # Sample z_k ~ N(0,I) for prior
-        z_k = torch.randn(B, self.num_samples, self.latent_size, device=device)   # [B,K,L]
+        z_k = torch.randn(
+            B, self.num_samples, self.latent_size, device=device
+        )  # [B,K,L]
 
         pred_pos_rel = self.generate_traj(hidde_obs_enc, z_k, B, device)
         return pred_pos_rel, hidde_obs_enc
-    
+
     def generate_traj(self, hidde_obs_enc, z_k, B, device):
         # guided drop out
         beta = torch.softmax(self.beta_fc(z_k), dim=-1)
         x_t0 = hidde_obs_enc.unsqueeze(1) * beta
 
         # Decoding
-        zeros_tail = torch.zeros(B * self.num_samples, self.pred_len-1, self.hidden_size, device=device)
+        zeros_tail = torch.zeros(
+            B * self.num_samples, self.pred_len - 1, self.hidden_size, device=device
+        )
         x_t0 = x_t0.view(B * self.num_samples, 1, self.hidden_size).contiguous()
         x_seq = torch.cat([x_t0, zeros_tail], dim=1)
 
         pred_pos_rel, _ = self.dec(x_seq)
-        pred_pos_rel = pred_pos_rel.view(B, self.num_samples, 2, self.pred_len).contiguous()
+        pred_pos_rel = pred_pos_rel.view(
+            B, self.num_samples, 2, self.pred_len
+        ).contiguous()
 
         return pred_pos_rel
-

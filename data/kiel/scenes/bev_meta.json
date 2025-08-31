@@ -22,7 +22,6 @@
       1.0
     ]
   ],
-  "feature_stride": 8,
   "channels": [
     "land_mask",
     "dist_to_coast_m",
