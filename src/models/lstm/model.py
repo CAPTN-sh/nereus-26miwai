@@ -31,4 +31,4 @@ class LSTMModel(nn.Module):
         return torch.cat(pred_pos_rel, dim=1).permute(0, 2, 1)
 
     def inference(self, batch, scene, scene_meta):
-        return self.forward(batch, scene, scene_meta)
+        return self.forward(batch, scene, scene_meta), None

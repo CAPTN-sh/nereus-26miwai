@@ -40,7 +40,12 @@ class IOC(nn.Module):
         
         acc_scores = torch.zeros(B*K, device=device)
 
+        # TODO params
+        score_stride = 4
+
         for t in range(T):
+            if not ((t % score_stride) == 0 or t == T-1):
+                continue
             pa_t = pred_pos_abs[:, :, t]
             pr_t = pred_pos_rel[:, :, t]
 

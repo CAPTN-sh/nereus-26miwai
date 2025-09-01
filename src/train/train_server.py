@@ -68,7 +68,7 @@ def train_worker(
 
     if rank == 0:
         logging.info(f"[Train] model: {model.__class__.__name__}")
-        logging.info(f"additional features: {train_dset.feature_cols}")
+        #logging.info(f"additional features: {train_dset.feature_cols}")
         logging.info(f"There are {len(train_dset)} traj loaded for training")
         logging.info(f"There are {len(eval_dset)} traj loaded for evaluation")
 
@@ -81,8 +81,7 @@ def train_worker(
     model = DDP(
         model.to(device),
         device_ids=[local_rank],
-        output_device=local_rank,
-        find_unused_parameters=True,
+        output_device=local_rank
     )
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -104,7 +103,7 @@ def train_worker(
             optimizer.zero_grad(set_to_none=True)
             batch = [t.to(device) for t in batch]
 
-            with amp.autocast(device_type="cuda"):
+            with amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                 output = model(batch, scene, scene_meta)
                 loss, loss_dict = loss_fn(output, batch, epoch)
 
@@ -150,16 +149,26 @@ def get_distributed_args():
 
 
 if __name__ == "__main__":
-    logger(file_prefix="train_server")
+    model_options = ["DESIRE" , "LSTM"]
+    model_choise = model_options[1]
+
+    logger(file_prefix=f"train_server_{model_choise}")
     dist_args = get_distributed_args()
+
+    if model_choise == "DESIRE":  
+        model = DESIRE(DESIREParams())
+        loss_fn = loss_desire
+        max_neighbors = 5
+
+    if model_choise == "LSTM":
+        model = LSTMModel(pred_len=36)
+        loss_fn = eval_loss
+        max_neighbors = 0
 
     data_folder = Path("/home/bbiesenbach/data/kiel/ais/3_features")
     scene_path = Path("data/kiel/scenes/bev.npz")
     scene_meta_path = Path("data/kiel/scenes/bev_meta.json")
 
-    model = LSTMModel()
-    loss_fn = eval_loss
-
     train_worker(
         dist_args,
         model=model,
@@ -167,19 +176,5 @@ if __name__ == "__main__":
         data_folder=data_folder,
         scene_path=scene_path,
         scene_meta_path=scene_meta_path,
-        max_neighbors=0,
-    )
-
-    model = DESIRE(DESIREParams())
-    loss_fn = loss_desire
-
-    train_worker(
-        dist_args,
-        model=model,
-        loss_fn=loss_fn,
-        data_folder=data_folder,
-        scene_path=scene_path,
-        scene_meta_path=scene_meta_path,
-        max_neighbors=10,
-        num_epochs=60,
+        max_neighbors=max_neighbors,
     )

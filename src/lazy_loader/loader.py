@@ -1,7 +1,8 @@
 from pathlib import Path
 
 import pandas as pd
-from torch.utils.data import DataLoader
+import torch
+from torch.utils.data import DataLoader, Subset
 from torch.utils.data.distributed import DistributedSampler
 
 from lazy_loader.trajectories import LazyTrajectoryDataset, seq_collate
@@ -25,10 +26,12 @@ def lazy_loader(
         min_date=min_date,
         max_date=max_date,
         feat_cols=feat_cols,
-        max_neighbors=max_neighbors
+        max_neighbors=max_neighbors,
+        obs_len=24,
+        pred_len=36,
     )
 
-    sampler = DistributedSampler(dset, num_replicas=world_size, rank=rank, shuffle=True)
+    sampler = DistributedSampler(dset, num_replicas=world_size, rank=rank, shuffle=True, drop_last=True)
 
     loader = DataLoader(
         dset,

@@ -83,4 +83,4 @@ class DESIRE(nn.Module):
             1, best_idx.view(-1, 1, 1, 1).expand(-1, 1, 2, self.pred_len)
         ).squeeze(1)
 
-        return pred_pos_rel_best
+        return pred_pos_rel_best, pred_pos_rel_refined
