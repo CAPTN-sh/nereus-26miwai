@@ -35,6 +35,6 @@ def loss_desire(output, batch, epoch):
     l2_ref = torch.norm(diff_ref, dim=2)  # [B,K,T]
     l_ref = l2_ref.mean()
 
-    beta = min(1.0, (epoch + 1) / 8)
+    beta = min(0.5, (epoch + 1) / 8)
     loss = l_recon + beta * l_kld + l_rank + l_ref
     return loss, {"l_recon": l_recon, "l_kld": l_kld, "l_rank": l_rank, "l_ref": l_ref}

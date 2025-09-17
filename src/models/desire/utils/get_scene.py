@@ -17,7 +17,7 @@ def sample_scene_features(scene_feats, pred_pos_abs, pos_to_px, feature_stride):
 
     with amp.autocast("cuda", enabled=False):
         pred = pred_pos_abs.to(device=device, dtype=torch.float32)
-        pos_to_px = torch.tensor(pos_to_px, dtype=torch.float32, device=device)
+        #pos_to_px = torch.tensor(pos_to_px, dtype=torch.float32, device=device)
 
         # world(m) -> BEV pixels
         B = pred.shape[0]

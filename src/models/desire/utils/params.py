@@ -8,7 +8,7 @@ class DESIREParams:
     # general
     pred_dim: int = 2
     pred_len: int = 36
-    num_refine_iters: int = 2
+    num_refine_iters: int = 1
 
     hidden_size: int = 32
     intermediate_size: int = 16
@@ -24,5 +24,5 @@ class DESIREParams:
     # social pooling
     num_rings: int = 6
     num_wedges: int = 6
-    rmin: int = 1
+    rmin: int = 5
     rmax: int = 1000

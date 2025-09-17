@@ -48,17 +48,19 @@ class SGM(nn.Module):
     def inference(self, obs_pos_rel: torch.Tensor):
         device = obs_pos_rel.device
         B = obs_pos_rel.size(0)
+        K = self.num_samples
+        L = self.latent_size
 
         # Encode observed
         hidde_obs_enc = self.enc_obs(obs_pos_rel)[1][-1]
 
         # Sample z_k ~ N(0,I) for prior
-        z_k = torch.randn(
-            B, self.num_samples, self.latent_size, device=device
-        )  # [B,K,L]
+        z_k = torch.randn(B, K, L, device=device)
+        mean = torch.zeros(B, K, L, device=device)
+        log_var = torch.zeros(B, K, L, device=device)
 
         pred_pos_rel = self.generate_traj(hidde_obs_enc, z_k, B, device)
-        return pred_pos_rel, hidde_obs_enc
+        return pred_pos_rel, hidde_obs_enc, mean, log_var
 
     def generate_traj(self, hidde_obs_enc, z_k, B, device):
         # guided drop out

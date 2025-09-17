@@ -22,7 +22,6 @@ from utils.logger import logger
 
 os.environ["OMP_NUM_THREADS"] = "4"
 
-
 def train_worker(
     dist_args,
     model,
@@ -68,7 +67,7 @@ def train_worker(
 
     if rank == 0:
         logging.info(f"[Train] model: {model.__class__.__name__}")
-        #logging.info(f"additional features: {train_dset.feature_cols}")
+        # logging.info(f"additional features: {train_dset.feature_cols}")
         logging.info(f"There are {len(train_dset)} traj loaded for training")
         logging.info(f"There are {len(eval_dset)} traj loaded for evaluation")
 
@@ -78,11 +77,11 @@ def train_worker(
     scene = torch.from_numpy(npz["I"]).unsqueeze(0).to(device)  # TODO unsqueeze?
     scene_meta = json.load(open(scene_meta_path))
 
-    model = DDP(
-        model.to(device),
-        device_ids=[local_rank],
-        output_device=local_rank
-    )
+    scene_meta["world_to_bev"] = torch.as_tensor(scene_meta["world_to_bev"], 
+                                            device=device, 
+                                            dtype=torch.float32)
+
+    model = DDP(model.to(device), device_ids=[local_rank], output_device=local_rank)
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.StepLR(
@@ -97,12 +96,12 @@ def train_worker(
 
         loss_sum_dict = {}
         loss_sum = 0.0
-        loss_eval = 0.0
         num_batches = 0
         for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch}")):
             optimizer.zero_grad(set_to_none=True)
             batch = [t.to(device) for t in batch]
 
+            optimizer.zero_grad(set_to_none=True)
             with amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                 output = model(batch, scene, scene_meta)
                 loss, loss_dict = loss_fn(output, batch, epoch)
@@ -120,24 +119,18 @@ def train_worker(
                     loss_sum_dict.get(loss_name, 0.0) + loss_val.item()
                 )
 
-            pred_pos_rel = output[0] if isinstance(output, tuple) else output
-            loss_eval += eval_loss(pred_pos_rel, batch)[0].item()
-
         scheduler.step()
 
         if rank == 0:
             loss_sum /= num_batches
-            loss_eval /= num_batches
-            logging.info(
-                f"[Epoch {epoch}] train_loss={loss_sum:.4f}, eval_loss={loss_eval:.4f}"
-            )
-            loss_print = f"[Epoch {epoch}]"
+            loss_print = f"[Epoch {epoch}] train_loss={loss_sum:.4f}"
             for loss_name, loss_val in loss_sum_dict.items():
                 loss_val /= num_batches
                 loss_print += f" {loss_name}={loss_val:.4f}"
             logging.info(loss_print)
 
-        eval(epoch, model.module, eval_loader, device, scene, scene_meta)
+        if (epoch + 1) % 4 == 0:
+            eval(epoch, model.module, eval_loader, device, scene, scene_meta)
     dist.destroy_process_group()
 
 
@@ -149,13 +142,17 @@ def get_distributed_args():
 
 
 if __name__ == "__main__":
-    model_options = ["DESIRE" , "LSTM"]
-    model_choise = model_options[1]
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.set_float32_matmul_precision("high")
+
+    model_options = ["DESIRE", "LSTM"]
+    model_choise = model_options[0]
 
     logger(file_prefix=f"train_server_{model_choise}")
     dist_args = get_distributed_args()
 
-    if model_choise == "DESIRE":  
+    if model_choise == "DESIRE":
         model = DESIRE(DESIREParams())
         loss_fn = loss_desire
         max_neighbors = 5
@@ -177,4 +174,6 @@ if __name__ == "__main__":
         scene_path=scene_path,
         scene_meta_path=scene_meta_path,
         max_neighbors=max_neighbors,
+        num_epochs = 64,
+        batch_size = 4*2048,
     )

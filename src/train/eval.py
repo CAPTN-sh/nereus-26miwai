@@ -60,7 +60,8 @@ def eval(epoch, model: nn.Module, eval_loader: DataLoader, device, scene, scene_
             with amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                 best_pred_pos_rel, k_pred_pos_rel = model.inference(batch, scene, scene_meta)
                 loss, loss_dict = eval_loss(best_pred_pos_rel, batch)
-                if k_pred_pos_rel:
+                eval_oracle = k_pred_pos_rel is not None
+                if eval_oracle:
                     loss_k, loss_dict_k = eval_oracle_k(k_pred_pos_rel, batch)
 
             num_batches += 1
@@ -70,7 +71,7 @@ def eval(epoch, model: nn.Module, eval_loader: DataLoader, device, scene, scene_
             fde_sum += loss_dict["fde"].item()
             l2max_sum += loss_dict["l2max"].item()
 
-            if k_pred_pos_rel:
+            if eval_oracle:
                 loss_k_sum += loss_k.item()
                 ade_k_sum += loss_dict_k["ade_k"].item()
                 fde_k_sum += loss_dict_k["fde_k"].item()
@@ -93,7 +94,7 @@ def eval(epoch, model: nn.Module, eval_loader: DataLoader, device, scene, scene_
         dist.all_reduce(l2max_sum, op=dist.ReduceOp.SUM)
         dist.all_reduce(num_batches, op=dist.ReduceOp.SUM)
 
-        if k_pred_pos_rel:
+        if eval_oracle:
             dist.all_reduce(loss_k_sum, op=dist.ReduceOp.SUM)
             dist.all_reduce(ade_k_sum, op=dist.ReduceOp.SUM)
             dist.all_reduce(fde_k_sum, op=dist.ReduceOp.SUM)
@@ -104,7 +105,7 @@ def eval(epoch, model: nn.Module, eval_loader: DataLoader, device, scene, scene_
     fde = fde_sum / num_batches
     l2max = l2max_sum / num_batches
 
-    if k_pred_pos_rel:
+    if eval_oracle:
         loss_k = loss_k_sum / num_batches
         ade_k = ade_k_sum / num_batches
         fde_k = fde_k_sum / num_batches
@@ -114,7 +115,7 @@ def eval(epoch, model: nn.Module, eval_loader: DataLoader, device, scene, scene_
         logging.info(
             f"[Eval] loss: {loss:.4f}, ADE: {ade:.4f}, FDE: {fde:.4f}, l2_max: {l2max:.4f}"
         )
-        if k_pred_pos_rel:
+        if eval_oracle:
             logging.info(
                 f"[Eval] loss_k: {loss_k:.4f}, ADE_k: {ade_k:.4f}, FDE_k: {fde_k:.4f}, l2_max_k: {l2max_k:.4f}"
             )
