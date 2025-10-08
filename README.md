@@ -6,11 +6,26 @@ To install all the requirements, one needs to first install:
 
 The proper installation must then be done with conda.
 
+conda create -n nereus_env python=3.11 -y
+conda activate nereus_env
+
+#### linux server
+
 export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu124"
 export PIP_FIND_LINKS="https://data.pyg.org/whl/torch-2.5.1+cu124.html"
 pip install -e .
 
 torchrun --standalone --nproc_per_node=4 --master_port=29515 src/train/train_server.py
+
+#### local windows
+
+pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu `
+  torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1
+
+pip install --no-deps --prefer-binary --only-binary=:all: --no-cache-dir `
+  torch-scatter==2.1.2 -f https://data.pyg.org/whl/torch-2.5.1+cpu.html
+
+pip install -e .
 
 ## Structure
 The project is structured in a way that allows for easy addition of new pipelines and tasks. 

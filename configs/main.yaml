@@ -1,9 +1,0 @@
-config:
-  # preprocessing configs
-  decode: "configs/preprocessing/decode.yaml"
-  transform_nodes: "configs/preprocessing/transform_nodes.yaml"
-  transform_edges: "configs/preprocessing/transform_edges.yaml"
-  
-folder:
-  maps: "data/kiel/maps"
-  ship_db: "data/kiel/ship_db"

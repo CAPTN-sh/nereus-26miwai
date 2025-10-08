@@ -1,5 +1,5 @@
 import torch.nn as nn
-import torch
+
 from models.desire.IOC import IOC
 from models.desire.nn.scene_pooling import ScenePoolingCNN
 from models.desire.SGM import SGM
