@@ -11,6 +11,8 @@ pyarrow
 geopandas
 shapely
 pyogrio
+affine
+rasterio
 
 # ---- ais stack ----
 pyais

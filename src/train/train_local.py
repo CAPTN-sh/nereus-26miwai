@@ -10,9 +10,9 @@ from tqdm import tqdm
 
 from lazy_loader.loader import lazy_loader
 from models.desire.model import DESIRE
-from models.desire.nn.loss import k_total_loss
+from models.desire.nn.loss import loss_desire
 from models.desire.utils.params import DESIREParams
-from train.eval import eval
+from train.eval import eval, eval_loss
 
 
 def train_cpu(
@@ -34,8 +34,8 @@ def train_cpu(
     # --- DataLoaders (single-process, no DDP) ---
     train_dset, train_sampler, train_loader = lazy_loader(
         data_folder=data_folder,
-        min_date=pd.Timestamp("2023-05-03"),
-        max_date=pd.Timestamp("2023-05-03"),
+        min_date=pd.Timestamp("2022-05-03"),
+        max_date=pd.Timestamp("2024-05-03"),
         world_size=1,
         rank=0,
         batch_size=batch_size,
@@ -43,8 +43,8 @@ def train_cpu(
     )
     eval_dset, eval_sampler, eval_loader = lazy_loader(
         data_folder=data_folder,
-        min_date=pd.Timestamp("2023-05-05"),
-        max_date=pd.Timestamp("2023-05-05"),
+        min_date=pd.Timestamp("2022-05-03"),
+        max_date=pd.Timestamp("2024-05-03"),
         world_size=1,
         rank=0,
         batch_size=batch_size,
@@ -60,6 +60,10 @@ def train_cpu(
     scene = torch.from_numpy(npz["I"]).unsqueeze(0).to(device)
     scene_meta = json.load(open(scene_meta_path))
 
+    scene_meta["world_to_bev"] = torch.as_tensor(
+        scene_meta["world_to_bev"], device=device, dtype=torch.float32
+    )
+
     # --- Model ---
     params = DESIREParams()
     model = DESIRE(params).to(device)
@@ -73,59 +77,47 @@ def train_cpu(
     # --- Train ---
     for epoch in range(num_epochs):
         model.train()
-        sum_loss = 0.0
-        num_batches = 0
+        train_sampler.set_epoch(epoch)
 
-        # some loaders require an epoch set even in single-process; ignore if not needed
-        if hasattr(train_sampler, "set_epoch"):
-            train_sampler.set_epoch(epoch)
+        loss_sum_dict = {}
+        loss_sum = 0.0
+        num_batches = 0
 
         for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch}")):
             optimizer.zero_grad()
+            batch = [t.to(device) for t in batch]
 
-            obs_feat, obs_pos, obs_pos_rel, fut_pos, fut_pos_rel, seq_start_end = [
-                tensor.to(device) for tensor in batch
-            ]
-            obs_pos_last = obs_pos[:, :, -1]
-
-            # Forward
-            pred_pos_rel, pred_pos_rel_refined, mean, log_var, scores = model(
-                obs_feat,
-                obs_pos_last,
-                obs_pos_rel,
-                fut_pos_rel,
-                seq_start_end,
-                scene,
-                scene_meta,
-            )
-
-            tloss, (l_reg, l_kld, l_ioc, l_ref) = k_total_loss(
-                pred_pos_rel, pred_pos_rel_refined, fut_pos_rel, mean, log_var, scores
-            )
-            final_loss = tloss
+            output = model(batch, scene, scene_meta)
+            loss, loss_dict = loss_desire(output, batch, epoch)
 
             # Backprop
-            final_loss.backward()
+            loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), norm_clip_value)
             optimizer.step()
 
-            sum_loss += final_loss.item()
             num_batches += 1
+            loss_sum += loss.item()
+            for loss_name, loss_val in loss_dict.items():
+                loss_sum_dict[loss_name] = (
+                    loss_sum_dict.get(loss_name, 0.0) + loss_val.item()
+                )
 
         scheduler.step()
-        avg_loss = sum_loss / max(1, num_batches)
-        print(
-            f"[Epoch {epoch}] total_loss={avg_loss:.6f}"
-            f"l_reg={l_reg.item():.6f}  l_kld={l_kld.item():.6f}  l_ioc={l_ioc.item():.6f}   l_ref={l_ref.item():.6f}"
-        )
 
-        eval(f"eval_plot_{epoch}", model, eval_loader, device, scene, scene_meta)
+        loss_sum /= num_batches
+        loss_print = f"[Epoch {epoch}] train_loss={loss_sum:.4f}"
+        for loss_name, loss_val in loss_sum_dict.items():
+            loss_val /= num_batches
+            loss_print += f" {loss_name}={loss_val:.4f}"
+        print(loss_print)
+
+        eval(epoch, model, eval_loader, device, scene, scene_meta)
 
 
 if __name__ == "__main__":
-    data_folder = Path("data/kiel/ais/3_features")
-    scene_path = Path("data/kiel/scenes/bev.npz")
-    scene_meta_path = Path("data/kiel/scenes/bev_meta.json")
+    data_folder = Path("data/ais/4_features/fhkiel_train/kiel/")
+    scene_path = Path("data/scenes/fhkiel_train/kiel/bev.npz")
+    scene_meta_path = Path("data/scenes/fhkiel_train/kiel/bev_meta.json")
 
     train_cpu(
         data_folder=data_folder,

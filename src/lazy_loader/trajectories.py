@@ -9,8 +9,11 @@ import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
+
 def seq_collate(data):
-    (obs_feat_seq, obs_pos_seq, obs_pos_rel_seq, fut_pos_seq, fut_pos_rel_seq) = zip(*data)
+    (obs_feat_seq, obs_pos_seq, obs_pos_rel_seq, fut_pos_seq, fut_pos_rel_seq) = zip(
+        *data
+    )
 
     _len = [len(seq) for seq in obs_pos_seq]
     cum_start_idx = [0] + np.cumsum(_len).tolist()
@@ -39,7 +42,11 @@ def get_interp_step_size(df: pd.DataFrame):
 def process_time(
     df: pd.DataFrame, min_date: pd.Timestamp, max_date: pd.Timestamp, step_size: int
 ) -> pd.DataFrame:
-    df = df[df["timestamp"].between(min_date, max_date + timedelta(days = 1))].copy().reset_index(drop=True)
+    df = (
+        df[df["timestamp"].between(min_date, max_date + timedelta(days=1))]
+        .copy()
+        .reset_index(drop=True)
+    )
     df["time"] = df["timestamp"].astype("datetime64[s]").astype("int64") // step_size
     df = df.set_index("time").sort_index()
     return df
@@ -104,25 +111,32 @@ def add_filled_gap_steps(df: pd.DataFrame, steps: int):
 
     return combined
 
+
 def add_rel_pos(df: pd.DataFrame):
     # df hast to be sorted by time and unique mmsi prior to function call!
     df["group_id"] = df.index.to_series().diff().gt(1).cumsum()
     df[["rel_x", "rel_y"]] = df.groupby("group_id")[["x", "y"]].diff().fillna(0)
     return df
 
+
 def cords_to_meters(df: pd.DataFrame):
     latlon_cols = [col for col in df.columns if "lat" in col or "lon" in col]
     if len(latlon_cols) % 2 != 0:
         raise ValueError(f"Uneven number of lat/lon columns: {latlon_cols}")
-    
+
     # TODO get CRS from config
-    transformer = pyproj.Transformer.from_crs(pyproj.CRS("EPSG:4326"), pyproj.CRS("EPSG:32632"), always_xy=True)
+    transformer = pyproj.Transformer.from_crs(
+        pyproj.CRS("EPSG:4326"), pyproj.CRS("EPSG:32632"), always_xy=True
+    )
     for i in range(0, len(latlon_cols), 2):
-        lon_col = latlon_cols[i] if "lon" in latlon_cols[i] else latlon_cols[i+1]
-        lat_col = latlon_cols[i] if "lat" in latlon_cols[i] else latlon_cols[i+1]
-        df[lon_col], df[lat_col] = transformer.transform(df[lon_col].values, df[lat_col].values)
+        lon_col = latlon_cols[i] if "lon" in latlon_cols[i] else latlon_cols[i + 1]
+        lat_col = latlon_cols[i] if "lat" in latlon_cols[i] else latlon_cols[i + 1]
+        df[lon_col], df[lat_col] = transformer.transform(
+            df[lon_col].values, df[lat_col].values
+        )
     df.columns = [col.replace("lon", "x").replace("lat", "y") for col in df.columns]
     return df
+
 
 class LazyTrajectoryDataset(Dataset):
     """Dataloder for the Trajectory datasets"""
@@ -166,14 +180,16 @@ class LazyTrajectoryDataset(Dataset):
         if nodes.empty:
             raise ValueError("There are no values within the given time range.")
 
-        exclude_mmsi = nodes[nodes["ship_type"].isin(exclude_ship_types)][
-            "mmsi"
-        ].unique()
-
+        # TODO config
+        ship_db_path = Path("data/ais/ship_db/ship_db.parquet")
+        ship_db = pd.read_parquet(ship_db_path)
+        exclude_mmsi = ship_db[ship_db["ship_type"].isin(exclude_ship_types)]["mmsi"]
 
         nodes = nodes[["mmsi", "lat", "lon"] + self.feature_cols]
         nodes = cords_to_meters(nodes)
-        self.feature_cols = [col.replace("lon", "x").replace("lat", "y") for col in self.feature_cols]
+        self.feature_cols = [
+            col.replace("lon", "x").replace("lat", "y") for col in self.feature_cols
+        ]
 
         edges = pd.read_parquet(edges_path)
         edges = process_time(edges, min_date, max_date, step_size)
@@ -189,7 +205,9 @@ class LazyTrajectoryDataset(Dataset):
             df = add_rel_pos(df)
             self.data[mmsi] = df
 
-    def _add_items_at_t(self, nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_neighbors):
+    def _add_items_at_t(
+        self, nodes, cur_t, exclude_mmsi, mmsis_in_frame, max_neighbors
+    ):
         nodes_t = nodes.loc[cur_t - self.obs_len : cur_t + self.pred_len - 1]
         if nodes_t.empty:
             return

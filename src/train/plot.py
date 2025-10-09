@@ -15,8 +15,9 @@ def plot_traj(
 
     fig, ax = plt.subplots(figsize=(50, 50))
 
-    map_path = Path("data/kiel/maps/kiel_districts.geojson")
-    background = gpd.read_file(map_path).to_crs("EPSG:32632")
+    # TODO config
+    map_path = Path("data/maps/2_standardized/fhkiel_train/kiel/land.geojson")
+    background = gpd.read_file(map_path).to_crs("EPSG:25832")
     background.plot(ax=ax, facecolor="lightgray", edgecolor="black", alpha=0.5)
 
     def plot_trajectories(ax, traj, i, color):
@@ -47,7 +48,7 @@ def plot_traj(
 
     ax.set_xlabel("Easting (m)")
     ax.set_ylabel("Northing (m)")
-    ax.set_title("AIS Positions (EPSG:32632)")
+    ax.set_title("AIS Positions (EPSG:25832)")
     ax.grid(True, linestyle=":", linewidth=0.7, alpha=0.6)
     plt.savefig(f"images/{file_name}.png")
     plt.close()

@@ -1,5 +1,5 @@
 {
-  "utm_crs": "EPSG:32632",
+  "local_crs": "EPSG:32632",
   "resolution": 10.0,
   "size_px": [
     1263,

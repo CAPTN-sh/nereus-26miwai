@@ -14,7 +14,7 @@ class DESIREParams:
     intermediate_size: int = 16
 
     # scene_cnn
-    in_channels: int = 4
+    in_channels: int = 2
     out_channels: int = 16
 
     # sgm

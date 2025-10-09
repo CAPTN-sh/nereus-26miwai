@@ -8,17 +8,19 @@ from tqdm import tqdm
 
 from train.plot import plot_traj
 
+
 def eval_oracle_k(k_pred_pos_rel, batch):
     _, _, _, _, fut_pos_rel, seq_start_end = batch
     ego = seq_start_end[:, 0]
     l2 = torch.norm(k_pred_pos_rel[ego] - fut_pos_rel[ego].unsqueeze(1), dim=2)
 
-    ade_k   = l2.mean(dim=2).min(dim=1).values.mean()
-    fde_k   = l2[:, :, -1].min(dim=1).values.mean()
+    ade_k = l2.mean(dim=2).min(dim=1).values.mean()
+    fde_k = l2[:, :, -1].min(dim=1).values.mean()
     l2max_k = l2.max(dim=2).values.min(dim=1).values.mean()
-    loss_k  = (ade_k + fde_k + l2max_k) / 3
+    loss_k = (ade_k + fde_k + l2max_k) / 3
 
     return loss_k, {"ade_k": ade_k, "fde_k": fde_k, "l2max_k": l2max_k}
+
 
 def eval_loss(pred_pos_rel, batch, epoch=None):
     _, _, _, _, fut_pos_rel, seq_start_end = batch
@@ -58,7 +60,9 @@ def eval(epoch, model: nn.Module, eval_loader: DataLoader, device, scene, scene_
             batch = [t.to(device) for t in batch]
 
             with amp.autocast(device_type="cuda", dtype=torch.bfloat16):
-                best_pred_pos_rel, k_pred_pos_rel = model.inference(batch, scene, scene_meta)
+                best_pred_pos_rel, k_pred_pos_rel = model.inference(
+                    batch, scene, scene_meta
+                )
                 loss, loss_dict = eval_loss(best_pred_pos_rel, batch)
                 eval_oracle = k_pred_pos_rel is not None
                 if eval_oracle:
@@ -79,7 +83,9 @@ def eval(epoch, model: nn.Module, eval_loader: DataLoader, device, scene, scene_
 
             if plot_cached is None and rank == 0:
                 _, obs_pos, _, fut_pos, _, seq_start_end = batch
-                pred_pos = obs_pos[:, :, -1].unsqueeze(2) + best_pred_pos_rel.cumsum(dim=2)
+                pred_pos = obs_pos[:, :, -1].unsqueeze(2) + best_pred_pos_rel.cumsum(
+                    dim=2
+                )
                 plot_cached = [
                     obs_pos.detach().cpu(),
                     fut_pos.detach().cpu(),

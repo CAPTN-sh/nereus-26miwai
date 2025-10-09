@@ -16,13 +16,13 @@ def lazy_loader(
     rank: int,
     batch_size: int,
     feat_cols=[],
-    max_neighbors = 10,
+    max_neighbors=10,
     pin_memory=True,
 ):
 
     dset = LazyTrajectoryDataset(
-        nodes_path=data_folder / "nodes.parquet",
-        edges_path=data_folder / "edges.parquet",
+        nodes_path=data_folder / "fhkiel_kiel_ship_features.parquet",
+        edges_path=data_folder / "fhkiel_kiel_ship2ship_features.parquet",
         min_date=min_date,
         max_date=max_date,
         feat_cols=feat_cols,
@@ -31,7 +31,9 @@ def lazy_loader(
         pred_len=36,
     )
 
-    sampler = DistributedSampler(dset, num_replicas=world_size, rank=rank, shuffle=True, drop_last=True)
+    sampler = DistributedSampler(
+        dset, num_replicas=world_size, rank=rank, shuffle=True, drop_last=True
+    )
 
     loader = DataLoader(
         dset,

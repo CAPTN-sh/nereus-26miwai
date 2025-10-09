@@ -3,10 +3,7 @@
 *.pth
 *nmea.txt
 *parquet
-
-# generated files to keep
-!data/kiel/ais/2_decoded/ship_info.parquet
-!data/kiel/ais/2_decoded/ship_info_crawler.parquet
+data/*
 
 # hidden folders and cache
 .*

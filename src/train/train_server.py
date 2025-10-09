@@ -22,6 +22,7 @@ from utils.logger import logger
 
 os.environ["OMP_NUM_THREADS"] = "4"
 
+
 def train_worker(
     dist_args,
     model,
@@ -77,9 +78,9 @@ def train_worker(
     scene = torch.from_numpy(npz["I"]).unsqueeze(0).to(device)  # TODO unsqueeze?
     scene_meta = json.load(open(scene_meta_path))
 
-    scene_meta["world_to_bev"] = torch.as_tensor(scene_meta["world_to_bev"], 
-                                            device=device, 
-                                            dtype=torch.float32)
+    scene_meta["world_to_bev"] = torch.as_tensor(
+        scene_meta["world_to_bev"], device=device, dtype=torch.float32
+    )
 
     model = DDP(model.to(device), device_ids=[local_rank], output_device=local_rank)
 
@@ -97,6 +98,7 @@ def train_worker(
         loss_sum_dict = {}
         loss_sum = 0.0
         num_batches = 0
+
         for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch}")):
             optimizer.zero_grad(set_to_none=True)
             batch = [t.to(device) for t in batch]
@@ -174,6 +176,6 @@ if __name__ == "__main__":
         scene_path=scene_path,
         scene_meta_path=scene_meta_path,
         max_neighbors=max_neighbors,
-        num_epochs = 64,
-        batch_size = 4*2048,
+        num_epochs=64,
+        batch_size=4 * 2048,
     )

@@ -4,7 +4,6 @@ from typing import Tuple
 
 import geopandas as gpd
 import numpy as np
-import pandas as pd
 import yaml
 from affine import Affine
 from rasterio.features import rasterize
@@ -17,13 +16,9 @@ RESOLUTION = 10  # meter per pixel
 EXPOSURE_HOURS = 100
 
 
-def grid_from_params(
-    params,
-) -> Tuple[Affine, int, int, Tuple[float, float, float, float]]:
+def grid_from_params(bbox, local_crs):
     xmin, ymin, xmax, ymax = (
-        gpd.GeoSeries([box(*params["bounds"])], crs="EPSG:4326")
-        .to_crs(params["utm_crs"])
-        .total_bounds
+        gpd.GeoSeries([box(*bbox)], crs="EPSG:4326").to_crs(local_crs).total_bounds
     )
     W = int(np.ceil((xmax - xmin) / RESOLUTION))
     H = int(np.ceil((ymax - ymin) / RESOLUTION))
@@ -73,35 +68,32 @@ def rates_log1p(
 
 if __name__ == "__main__":
     # load params
-    params_path = Path("configs/preprocessing/kiel_meta_data.yaml").resolve()
+    params_path = Path("configs/config.yaml").resolve()
     with open(params_path, "r") as f:
         params = yaml.safe_load(f)
 
+    local_crs = params["geo_data"]["local_crs"]
+    bbox = params["geo_data"]["bboxes"]["kiel"]
+
     # create grid
-    transform, H, W, bounds_utm = grid_from_params(params)
+    transform, H, W, bounds_utm = grid_from_params(bbox, local_crs)
 
     # load data
-    coastline_path = Path("data/kiel/maps/kiel_districts.geojson").resolve()
-    coast = gpd.read_file(coastline_path).to_crs("EPSG:4326").to_crs(params["utm_crs"])
-
-    ais_path = Path("data/kiel/ais/3_features/nodes.parquet").resolve()
-    df = pd.read_parquet(ais_path)
-    gdf = gpd.GeoDataFrame(
-        df,
-        geometry=gpd.points_from_pos(df["lon"], df["lat"]),
-        crs="EPSG:4326",
-    ).to_crs(params["utm_crs"])
+    coastline_path = Path(
+        "data/maps/2_standardized/fhkiel_train/kiel/land.geojson"
+    ).resolve()
+    coast = gpd.read_file(coastline_path).to_crs("EPSG:4326").to_crs(local_crs)
 
     # generate scene
     land = rasterize_land(coast, transform, H, W).astype(np.float32)
     dist = dist_to_coast_m(land)
-    sail = rates_log1p(gdf[gdf["sailing_vessel"]], bounds_utm, H, W)
-    nsail = rates_log1p(gdf[~gdf["sailing_vessel"]], bounds_utm, H, W)
 
-    scene = np.stack([land, dist, sail, nsail], axis=0).astype(np.float32)
+    # TODO add tif
+
+    scene = np.stack([land, dist], axis=0).astype(np.float32)
 
     # save scene
-    out_dir = Path("data/kiel/scenes").resolve()
+    out_dir = Path("data/scenes/fhkiel_train/kiel").resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out_dir / "bev.npz", I=scene)
 
@@ -109,7 +101,7 @@ if __name__ == "__main__":
     w2b = ~transform
     world_to_bev = [[w2b.a, w2b.b, w2b.c], [w2b.d, w2b.e, w2b.f], [0.0, 0.0, 1.0]]
     meta = {
-        "utm_crs": params["utm_crs"],
+        "local_crs": local_crs,
         "resolution": float(RESOLUTION),
         "size_px": [int(W), int(H)],
         "world_to_bev": world_to_bev,

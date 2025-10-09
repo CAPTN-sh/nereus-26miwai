@@ -1,4 +1,4 @@
 # meta data about the kiel data
 
-utm_crs: "EPSG:32632"
-bounds: [10.13, 54.31, 10.32,  54.46] # [lon_min, lat_min, lon_max, lat_max]
+local_crs: "EPSG:25832"
+bounds: [10.12, 54.31, 10.33, 54.46] # [lon_min, lat_min, lon_max, lat_max]
