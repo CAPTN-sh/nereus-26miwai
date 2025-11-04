@@ -57,6 +57,8 @@ def eval(epoch, model: nn.Module, eval_loader: DataLoader, device, scene, scene_
 
     with torch.inference_mode():
         for batch in tqdm(eval_loader, desc="Evaluating"):
+            if num_batches > 100:
+                break
             batch = [t.to(device) for t in batch]
 
             with amp.autocast(device_type="cuda", dtype=torch.bfloat16):

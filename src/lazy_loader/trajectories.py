@@ -126,7 +126,7 @@ def cords_to_meters(df: pd.DataFrame):
 
     # TODO get CRS from config
     transformer = pyproj.Transformer.from_crs(
-        pyproj.CRS("EPSG:4326"), pyproj.CRS("EPSG:32632"), always_xy=True
+        pyproj.CRS("EPSG:4326"), pyproj.CRS("EPSG:25832"), always_xy=True
     )
     for i in range(0, len(latlon_cols), 2):
         lon_col = latlon_cols[i] if "lon" in latlon_cols[i] else latlon_cols[i + 1]
@@ -218,8 +218,8 @@ class LazyTrajectoryDataset(Dataset):
 
         full_traj_mmsi = [
             mmsi
-            for mmsi, l in traj_len.items()
-            if (l == self.obs_len + self.pred_len) and (mmsi not in exclude_mmsi)
+            for mmsi, len in traj_len.items()
+            if (len == self.obs_len + self.pred_len) and (mmsi not in exclude_mmsi)
         ]
 
         for mmsi in full_traj_mmsi:
