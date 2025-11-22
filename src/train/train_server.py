@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import numpy as np
+import optuna
 import pandas as pd
 import torch
 import torch.distributed as dist
@@ -12,15 +13,52 @@ from torch import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
 
-from lazy_loader.loader import lazy_loader
 from models.desire.model import DESIRE
 from models.desire.nn.loss import loss_desire
 from models.desire.utils.params import DESIREParams
 from models.lstm.model import LSTMModel
+from models.lstm.params import LSTMParams
+from sceen_loader.loader import sceen_loader
 from train.eval import eval, eval_loss
 from utils.logger import logger
 
-os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["OMP_NUM_THREADS"] = "3"
+
+
+def tune_gpu(
+    trial: optuna.trial.Trial,
+    dist_args,
+    model,
+    model_params,
+    model_hyper_params,
+    loss_fn,
+    data_folder: Path,
+    scene_path: Path,
+    scene_meta_path: Path,
+    num_epochs: int = 64,
+    eval_fn=eval,
+):
+    # --- Hyperparameters to be tuned by Optuna ---
+    for param, values in model_hyper_params.items():
+        setattr(model_params, param, trial.suggest_categorical(param, values))
+
+    batch_size = trial.suggest_categorical("batch_size", [256, 512, 1024])
+    lr = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
+
+    optuna_loss = train_worker(
+        dist_args,
+        model(model_params),
+        loss_fn,
+        data_folder,
+        scene_path,
+        scene_meta_path,
+        eval_fn=eval_fn,
+        num_epochs=num_epochs,
+        batch_size=batch_size,
+        lr=lr,
+    )
+    dist.barrier()
+    return optuna_loss
 
 
 def train_worker(
@@ -31,39 +69,37 @@ def train_worker(
     scene_path: Path,
     scene_meta_path: Path,
     batch_size: int = 128,
-    num_epochs: int = 30,
-    norm_clip_value: float = 1.0,
+    num_epochs: int = 10,
     lr: float = 4e-3,
-    max_neighbors=10,
+    eval_fn=eval,
 ):
     ### --- DDP Setup --- ###
     rank, world_size, local_rank = dist_args
-    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(local_rank)
     device = torch.device(f"cuda:{local_rank}")
-    logging.info(f"[Rank {rank}] Starting training on {device}")
+    logging.info(f"[Rank {rank}] Running trial on {device}")
 
     ### --- DataLoader --- ###
-    train_dset, train_sampler, train_loader = lazy_loader(
+    train_dset, train_sampler, train_loader = sceen_loader(
         data_folder=data_folder,
-        min_date=pd.Timestamp("2022-04-14"),
-        max_date=pd.Timestamp("2022-04-16"),
+        min_date=pd.Timestamp("2022-05-03"),
+        max_date=pd.Timestamp("2023-05-03"),
         world_size=world_size,
         rank=rank,
         batch_size=batch_size,
         pin_memory=True,
-        max_neighbors=max_neighbors,
+        feat_cols=["speed", "course"],
     )
 
-    eval_dset, eval_sampler, eval_loader = lazy_loader(
+    eval_dset, eval_sampler, eval_loader = sceen_loader(
         data_folder=data_folder,
-        min_date=pd.Timestamp("2022-06-01"),
-        max_date=pd.Timestamp("2022-06-01"),
+        min_date=pd.Timestamp("2022-05-03"),
+        max_date=pd.Timestamp("2023-05-03"),
         world_size=world_size,
         rank=rank,
         batch_size=batch_size,
         pin_memory=True,
-        max_neighbors=max_neighbors,
+        feat_cols=["speed", "course"],
     )
 
     if rank == 0:
@@ -110,7 +146,7 @@ def train_worker(
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), norm_clip_value)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
             scaler.step(optimizer)
             scaler.update()
 
@@ -132,8 +168,13 @@ def train_worker(
             logging.info(loss_print)
 
         if (epoch + 1) % 4 == 0:
-            eval(epoch, model.module, eval_loader, device, scene, scene_meta)
-    dist.destroy_process_group()
+            optuna_loss = eval_fn(
+                epoch, model.module, eval_loader, device, scene, scene_meta
+            )
+    if rank == 0:
+        return optuna_loss
+    else:
+        return 0.0
 
 
 def get_distributed_args():
@@ -148,34 +189,54 @@ if __name__ == "__main__":
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.set_float32_matmul_precision("high")
 
+    dist_args = get_distributed_args()
+    rank, world_size, local_rank = dist_args
+    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+
     model_options = ["DESIRE", "LSTM"]
     model_choise = model_options[0]
 
     logger(file_prefix=f"train_server_{model_choise}")
-    dist_args = get_distributed_args()
 
     if model_choise == "DESIRE":
         model = DESIRE(DESIREParams())
         loss_fn = loss_desire
-        max_neighbors = 5
+        eval_fn = eval
 
     if model_choise == "LSTM":
-        model = LSTMModel(pred_len=36)
+        model = LSTMModel
+        model_params = LSTMParams()
+        model_hyper_params = {"hidden_size": [32, 64, 128]}
         loss_fn = eval_loss
-        max_neighbors = 0
+        eval_fn = eval
 
     data_folder = Path("/home/bbiesenbach/data/kiel/ais/3_features")
     scene_path = Path("data/kiel/scenes/bev.npz")
     scene_meta_path = Path("data/kiel/scenes/bev_meta.json")
 
-    train_worker(
-        dist_args,
-        model=model,
-        loss_fn=loss_fn,
-        data_folder=data_folder,
-        scene_path=scene_path,
-        scene_meta_path=scene_meta_path,
-        max_neighbors=max_neighbors,
-        num_epochs=64,
-        batch_size=4 * 2048,
+    # --- Optuna Study ---
+    study = optuna.create_study(direction="minimize")
+    study.optimize(
+        lambda trial: tune_gpu(
+            trial,
+            dist_args,
+            model=model,
+            model_params=model_params,
+            model_hyper_params=model_hyper_params,
+            loss_fn=loss_fn,
+            eval_fn=eval_fn,
+            data_folder=data_folder,
+            scene_path=scene_path,
+            scene_meta_path=scene_meta_path,
+        ),
+        n_trials=20,
     )
+
+    dist.destroy_process_group()
+
+    print("Best trial:")
+    trial = study.best_trial
+    print(f"  Value: {trial.value}")
+    print("  Params: ")
+    for key, value in trial.params.items():
+        print(f"    {key}: {value}")

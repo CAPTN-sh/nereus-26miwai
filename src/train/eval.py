@@ -23,9 +23,9 @@ def eval_oracle_k(k_pred_pos_rel, batch):
 
 
 def eval_loss(pred_pos_rel, batch, epoch=None):
-    _, _, _, _, fut_pos_rel, seq_start_end = batch
-    ego = seq_start_end[:, 0]
-    l2 = torch.norm(pred_pos_rel[ego] - fut_pos_rel[ego], dim=1)
+    _, _, _, _, fut_pos_rel, seq_start_end, train_mask = batch
+    l2 = torch.norm(pred_pos_rel - fut_pos_rel, dim=1)
+    l2 = l2[train_mask]
 
     ade = l2.mean()
     fde = l2[:, -1].mean()
@@ -57,8 +57,8 @@ def eval(epoch, model: nn.Module, eval_loader: DataLoader, device, scene, scene_
 
     with torch.inference_mode():
         for batch in tqdm(eval_loader, desc="Evaluating"):
-            if num_batches > 100:
-                break
+            # if num_batches > 100:
+            #    break
             batch = [t.to(device) for t in batch]
 
             with amp.autocast(device_type="cuda", dtype=torch.bfloat16):
@@ -84,7 +84,7 @@ def eval(epoch, model: nn.Module, eval_loader: DataLoader, device, scene, scene_
                 l2max_k_sum += loss_dict_k["l2max_k"].item()
 
             if plot_cached is None and rank == 0:
-                _, obs_pos, _, fut_pos, _, seq_start_end = batch
+                _, obs_pos, _, fut_pos, _, seq_start_end, train_mask = batch
                 pred_pos = obs_pos[:, :, -1].unsqueeze(2) + best_pred_pos_rel.cumsum(
                     dim=2
                 )
@@ -130,3 +130,5 @@ def eval(epoch, model: nn.Module, eval_loader: DataLoader, device, scene, scene_
         plot_traj(f"eval_{model.__class__.__name__}_{epoch}", *plot_cached)
 
     model.train()
+
+    return loss.item()
