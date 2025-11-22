@@ -35,7 +35,7 @@ def eval_heatmap(
 
     with torch.inference_mode():
         for batch in tqdm(eval_loader, desc="Evaluating (heat maps)"):
-            if num_batches > 0:
+            if num_batches > 1:
                 break
 
             batch = [t.to(device) for t in batch]
@@ -46,7 +46,7 @@ def eval_heatmap(
             num_batches += 1
 
             # Make and save ONE qualitative plot per epoch
-            if plotted < 2:
+            if plotted < 4:
                 plotted += 1
 
                 B, _, x_bins, y_bins = output["intent_logits"].shape
@@ -60,7 +60,7 @@ def eval_heatmap(
                 probs = F.softmax(logits, dim=1)
                 pred_heatmap = probs.view(B, x_bins, y_bins).contiguous()
                 pred_heatmap = pred_heatmap[0].detach().cpu().numpy()
-                plot_heatmap(f"pred_heatmap_{epoch}_{plotted}", pred_heatmap)
+                plot_heatmap(f"pred_heatmap_{epoch}_{plotted}", pred_heatmap, target_heatmap)
 
     # Average KL over batches
     if num_batches > 0:

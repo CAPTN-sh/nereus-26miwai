@@ -5,15 +5,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def plot_heatmap(file_name: str, heatmap: np.ndarray):
+def plot_heatmap(file_name: str, pred: np.ndarray, target: np.ndarray = None):
     os.makedirs("images", exist_ok=True)
 
-    X, Y = heatmap.shape  # (X, Y)
+    X, Y = pred.shape  # (X, Y)
 
     fig, ax = plt.subplots(figsize=(int(X / 10), int(Y / 10)))
 
     im = ax.imshow(
-        heatmap.T,
+        pred.T,
         origin="lower",
         interpolation="nearest",
         aspect="equal",
@@ -22,6 +22,18 @@ def plot_heatmap(file_name: str, heatmap: np.ndarray):
     )
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     cbar.set_label("Probability", rotation=90)
+
+    if target is not None:
+        mask = (target > 0).astype(float)
+
+        # contour expects the same orientation as imshow content, so use mask.T
+        ax.contour(
+            mask.T,
+            levels=[0.5],
+            colors="red",
+            linewidths=0.8,
+            origin="lower",
+        )
 
     # Grid cosmetics
     ax.set_xlim(-0.5, X - 0.5)

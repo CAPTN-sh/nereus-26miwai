@@ -6,7 +6,7 @@ class TraisformerParams:
     # Sequence lengths
     # TODO from data loader config
     obs_len: int = 24
-    pred_len: int = 36
+    pred_len: int = 128
     max_seqlen = obs_len + pred_len
 
     # Model dims

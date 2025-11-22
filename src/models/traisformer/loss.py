@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from .params import TraisformerParams
 from .rasterize import Rasterizer
 
-
 def fut_to_heatmap(batch, device, dtype):
     config = TraisformerParams()
     _, _, _, fut_pos, _, _ = batch
@@ -21,7 +20,22 @@ def fut_to_heatmap(batch, device, dtype):
     ones = torch.ones_like(lin, dtype=dtype)
     target.scatter_add_(dim=1, index=lin.long(), src=ones)
     target = target.clip(0, 1)
-    target = target / target.sum(dim=1, keepdim=True)
+
+    # add blur gaussian aprox
+    kernel = torch.tensor(
+        [[1, 1, 1],
+         [1, 4, 1],
+         [1, 1, 1]],
+        device=device, dtype=dtype
+    ).view(1, 1, 3, 3)
+    #kernel = (kernel / kernel.sum()).view(1, 1, 3, 3)
+
+    img = target.view(B, 1, x_bins, y_bins)
+    img = F.pad(img, (1, 1, 1, 1), mode="reflect")
+    blurred = F.conv2d(img, kernel)
+
+    target = blurred.view(B, -1).clip(0, 4)
+    target = target/target.sum(dim=1, keepdim=True)
 
     return target
 
@@ -44,4 +58,9 @@ def loss_intent_heatmap(
     kl_loss = F.kl_div(log_probs, target, reduction="batchmean")
     mse = F.mse_loss(log_probs, target)
 
-    return ce_loss, {"ce": ce_loss, "kl_div": kl_loss, "mse": mse}
+    probs = log_probs.exp()
+    entropy = -(probs * log_probs).sum(dim=1).mean()
+
+    loss = ce_loss - 1e-3 * entropy
+
+    return loss, {"ce": ce_loss, "kl_div": kl_loss, "mse": mse}
