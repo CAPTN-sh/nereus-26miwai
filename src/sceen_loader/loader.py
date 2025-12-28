@@ -16,6 +16,7 @@ def sceen_loader(
     batch_size: int,
     feat_cols=[],
     pin_memory=True,
+    normalizer_path = None
 ):
 
     dset = SceenTrajectoryDataset(
@@ -25,7 +26,8 @@ def sceen_loader(
         max_date=max_date,
         feat_cols=feat_cols,
         obs_len=24,
-        pred_len=36,
+        pred_len=24,
+        normalizer_path = normalizer_path
     )
 
     sampler = DistributedSampler(

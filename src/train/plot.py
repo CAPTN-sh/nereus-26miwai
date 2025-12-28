@@ -29,9 +29,9 @@ def plot_traj(
     for i, (s, e) in enumerate(seq_start_end):
         if i > 5:
             break
-        plot_trajectories(ax, obs_pos, s, color="blue")
-        plot_trajectories(ax, fut_pos, s, color="green")
-        plot_trajectories(ax, pred_pos, s, color="red")
+        plot_trajectories(ax, obs_pos, i, color="blue")
+        plot_trajectories(ax, fut_pos, i, color="green")
+        plot_trajectories(ax, pred_pos, i, color="red")
 
     legend_elements = [
         Line2D([0], [0], color="blue", label="Observed"),

@@ -4,22 +4,36 @@ from dataclasses import dataclass
 @dataclass
 class TraisformerParams:
     # Sequence lengths
-    # TODO from data loader config
-    obs_len: int = 24
-    pred_len: int = 128
-    max_seqlen = obs_len + pred_len
+    full_feat_set: bool = False
+    pred_scope: str = "destination" # ["path", "destination"]
+    
+    pred_len: int = 12
+    obs_len: int = 144 # fix at 12min
+
+    # bbox
+    # TODO from config
+    bbox = [10.12, 54.31, 10.33, 54.46]
 
     # Model dims
     n_head: int = 8
     n_layer: int = 8
-    n_x_embd: int = 128
-    n_y_embd: int = 128
-    n_embd: int = 256 + 128  # must equal n_embd_x + n_embd_y
+
+    # state_embd
+    n_spatial_embd: int = 128
+    n_kinematic_embd: int = 64
+    n_dynamic_embd: int = 32
+
+    n_chanels: int = 4
+    n_terrain_embd: int = 64
+
+    n_vessel_feat: int = 5
+    n_vessel_embd: int = 32
+
+    n_embd = 2 * (128 + 64 + 32) + 64 + 32
 
     # Dropouts
-    pdrop: float = 0.1
+    dropout: float = 0.1
+    attn_dropout: float = 0.1
 
-    # Intent head specifics
-    intent_from: str = "obs_last"  # "obs_last" or "obs_mean": which hidden to use
-    intent_gauss_sigma_px: float = 1.2  # ~1-2 px blur as requested
-    intent_target_eps: float = 1e-8  # to avoid log(0) when normalizing
+    # loss
+    coarse_loss_beta: float = 1

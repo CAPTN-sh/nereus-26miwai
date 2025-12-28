@@ -4,7 +4,6 @@ import torch.nn as nn
 from .params import TraisformerParams
 from .rasterize import Rasterizer
 from .transformer_block import Block
-from .map_encoder import ScenePoolingCNN
 
 
 class TrAISformer(nn.Module):
@@ -12,31 +11,18 @@ class TrAISformer(nn.Module):
 
     def __init__(self, config: TraisformerParams):
         super().__init__()
-        self.full_feat_set = config.full_feat_set
+        config.n_embd = 2*config.n_pos_embd + 2*config.n_kin_embd
+
         self.raster = Rasterizer(config.bbox)
-        self.x_size, self.y_size, sog_size, cog_size, acc_size, rot_size = (
+        self.x_size, self.y_size, self.sog_size, self.cog_size = (
             self.raster.get_total_grid_sizes()
         )
 
-        # state_embd
-        self.lat_emb = nn.Embedding(self.x_size, config.n_spatial_embd)
-        self.lon_emb = nn.Embedding(self.y_size, config.n_spatial_embd)
-        self.sog_emb = nn.Embedding(sog_size, config.n_kinematic_embd)
-        self.cog_emb = nn.Embedding(cog_size, config.n_kinematic_embd)
-
-        config.n_embd = 2*config.n_spatial_embd + 2*config.n_kinematic_embd
-
-        if self.full_feat_set:
-            # state_embd
-            self.acc_emb = nn.Embedding(acc_size, config.n_dynamic_embd)
-            self.rot_emb = nn.Embedding(rot_size, config.n_dynamic_embd)
-
-            # context_embd
-            self.scene_cnn = ScenePoolingCNN(in_channels=4)
-            self.terrain_embd = nn.Linear(64, config.n_terrain_embd)
-            self.vessel_embd = nn.Linear(config.n_vessel_feat, config.n_vessel_embd)
-
-            config.n_embd += 2*config.n_dynamic_embd + config.n_terrain_embd + config.n_vessel_embd
+        # Passing from the 4-D space to a high-dimentional space
+        self.lat_emb = nn.Embedding(self.x_size, config.n_pos_embd)
+        self.lon_emb = nn.Embedding(self.y_size, config.n_pos_embd)
+        self.sog_emb = nn.Embedding(self.sog_size, config.n_kin_embd)
+        self.cog_emb = nn.Embedding(self.cog_size, config.n_kin_embd)
 
         self.pos_emb = nn.Parameter(torch.zeros(1, config.obs_len, config.n_embd))
         self.drop = nn.Dropout(config.dropout)
@@ -49,7 +35,6 @@ class TrAISformer(nn.Module):
         self.intent_head = nn.Linear(config.n_embd, self.x_size * self.y_size)
 
         self.apply(self._init_weights)
-        nn.init.normal_(self.pos_emb, std=0.02)
 
     def _init_weights(self, module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
@@ -75,19 +60,6 @@ class TrAISformer(nn.Module):
                 self.cog_emb(cog_idx),
             ), dim=-1
         )
-
-        if self.full_feat_set:
-            map_features = self.scene_cnn(scene).unsqueeze(1).expand(B, seqlen, -1)
-            acc_idx, rot_idx = self.raster.dyn_to_index(obs_feat[..., 2:4])
-            token_embeddings = torch.cat(
-                (
-                    token_embeddings,
-                    self.acc_emb(acc_idx),
-                    self.rot_emb(rot_idx),
-                    self.terrain_embd(map_features),
-                    self.vessel_embd(obs_feat[..., 4:]),
-                ), dim=-1
-            )
 
         position_embeddings = self.pos_emb[:, :seqlen, :]
         fea = self.drop(token_embeddings + position_embeddings)

@@ -2,204 +2,412 @@ import json
 import logging
 import os
 from pathlib import Path
+from datetime import datetime
 
 import numpy as np
-import optuna
 import pandas as pd
 import torch
 import torch.optim as optim
 from torch import amp
 from tqdm import tqdm
+import optuna
 
 from models.desire.model import DESIRE
 from models.desire.nn.loss import loss_desire
 from models.desire.utils.params import DESIREParams
+from models.lstm.loss import mse, eval_lstm
 from models.lstm.model import LSTMModel
 from models.lstm.params import LSTMParams
-from sceen_loader.loader import sceen_loader
+from models.traisformer.hierarchical_loss import loss_intent_heatmap, loss_occupancy_heatmap
+from models.traisformer.model import TrAISformer
+from models.traisformer.params import TraisformerParams
+from train.eval_heatmap import eval_heatmap
+from loader_heatmap.loader import loader_heatmap
 from train.eval import eval, eval_loss
 from utils.logger import logger
+from train.early_stopper import EarlyStopper
+from models.traisformer.scene_gernerator import process_maps
+from models.traisformer.rasterize import Rasterizer
 
-os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+# ---------- JSONL logging (multi-process safe via file lock) ----------
+def _append_jsonl_atomic(jsonl_path: Path, record: dict):
+    """
+    Append one JSON object per line to jsonl_path.
+    Uses an advisory file lock (fcntl) so multiple GPU workers can write safely.
+    """
+    jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # fcntl exists on Linux (your setup)
+    import fcntl  # noqa: WPS433
+
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    with open(jsonl_path, "a", encoding="utf-8") as f:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            f.write(line)
+            f.flush()
+            os.fsync(f.fileno())
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
-def tune_gpu(
-    trial: optuna.trial.Trial,
-    gpu_id: int,
-    args,
-    model,
+def trial_jsonl_callback(jsonl_path: Path):
+    """
+    Optuna callback factory: called after each trial finishes (success/pruned/fail).
+    Appends a JSON record to a shared JSONL.
+    """
+    def _cb(study: optuna.Study, trial: optuna.trial.FrozenTrial):
+        formatted_params = {k: round(v, 7) if isinstance(v, float) else v for k, v in trial.params.items()}
+        record = {
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "trial_number": trial.number,
+            "epochs_ran": trial.user_attrs.get("epochs_ran", None),
+            "state": trial.state.name,
+            "value": trial.value,
+            "params": formatted_params,
+            "cuda_device": os.environ.get("CUDA_VISIBLE_DEVICES", None),
+        }
+        _append_jsonl_atomic(jsonl_path, record)
+
+    return _cb
+
+
+def train_single_gpu(
+    model_cls,
+    cfg,
     loss_fn,
+    eval_fn,
     data_folder: Path,
     scene_path: Path,
     scene_meta_path: Path,
-    batch_size: int = 128,
-    num_epochs: int = 30,
-    norm_clip_value: float = 1.0,
-    lr: float = 4e-3,
-    eval_fn=eval,
+    batch_size: int,
+    num_epochs: int,
+    lr:float,
+    weight_decay:float,
+    trial: optuna.Trial | None = None,
 ):
-    # --- Hyperparameters to be tuned by Optuna ---
-    model_params = args["model_params"]
-    for param, values in args["model_hyper_params"].items():
-        setattr(model_params, param, trial.suggest_categorical(param, values))
-
-    batch_size = trial.suggest_categorical("batch_size", [1024, 2048, 4096])
-    lr = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
-
-    ### --- GPU Setup --- ###
-    device = torch.device(f"cuda:{gpu_id}")
+    # One trial = one GPU (the worker process sets CUDA_VISIBLE_DEVICES)
+    assert torch.cuda.is_available()
+    device = torch.device("cuda:0")
     torch.cuda.set_device(device)
-    logging.info(f"[Trial {trial.number}] Starting training on {device}")
 
-    ### --- DataLoader --- ###
-    train_dset, train_sampler, train_loader = sceen_loader(
+    print(
+        "CUDA_VISIBLE_DEVICES=", os.environ.get("CUDA_VISIBLE_DEVICES"),
+        " torch.cuda.current_device()=", torch.cuda.current_device(),
+        " name=", torch.cuda.get_device_name(0),
+        flush=True
+    )
+
+    logging.info("#" * 20)
+    logging.info(f"[Trial] number={trial.number}")
+    formatted_params = {k: round(v, 7) if isinstance(v, float) else v for k, v in trial.params.items()}
+    logging.info(f"[Trial] params={formatted_params}")
+
+    train_dset, _, train_loader = loader_heatmap(
         data_folder=data_folder,
-        min_date=pd.Timestamp("2022-04-14"),
-        max_date=pd.Timestamp("2022-04-16"),
+        flag="train",
+        min_date=pd.Timestamp("2022-01-01"),
+        max_date=pd.Timestamp("2024-01-01"),
         world_size=1,
         rank=0,
         batch_size=batch_size,
         pin_memory=True,
         feat_cols=["speed", "course"],
+        fut_len=cfg.pred_len,
+        obs_len=cfg.obs_len,
     )
 
-    eval_dset, eval_sampler, eval_loader = sceen_loader(
+    eval_dset, _, eval_loader = loader_heatmap(
         data_folder=data_folder,
-        min_date=pd.Timestamp("2022-06-01"),
-        max_date=pd.Timestamp("2022-06-01"),
+        flag="val",
+        min_date=pd.Timestamp("2022-01-01"),
+        max_date=pd.Timestamp("2024-01-01"),
         world_size=1,
         rank=0,
-        batch_size=batch_size,
+        batch_size=128,
         pin_memory=True,
         feat_cols=["speed", "course"],
+        fut_len=cfg.pred_len,
+        obs_len=cfg.obs_len,
     )
 
-    logging.info(f"[Train] model: {model.__name__}")
-    logging.info(f"There are {len(train_dset)} traj loaded for training")
-    logging.info(f"There are {len(eval_dset)} traj loaded for evaluation")
+    model = model_cls(cfg).to(device)
 
-    ### --- Model --- ###
-    model = model(model_params).to(device)
-    npz = np.load(scene_path)
-    scene = torch.from_numpy(npz["I"]).unsqueeze(0).to(device)  # TODO unsqueeze?
-    scene_meta = json.load(open(scene_meta_path))
+    if model == "DESIRE":
+        npz = np.load(scene_path)
+        scene = torch.from_numpy(npz["I"]).unsqueeze(0).to(device)
+        scene_meta = json.load(open(scene_meta_path))
+        scene_meta["world_to_bev"] = torch.as_tensor(
+            scene_meta["world_to_bev"], device=device, dtype=torch.float32
+        )
+    #TODO select scene depending on model
+    path = "/data/projects/ship_tracker/assets/maps/2_standardized/fh/kiel/"
+    my_rasterizer = Rasterizer([10.12, 54.31, 10.33, 54.46])
 
-    scene_meta["world_to_bev"] = torch.as_tensor(
-        scene_meta["world_to_bev"], device=device, dtype=torch.float32
-    )
+    scene_contiguous = np.ascontiguousarray(process_maps(my_rasterizer, path))
+    scene = torch.from_numpy(scene_contiguous).unsqueeze(0).to(device)
+    scene_meta = None
 
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.StepLR(
-        optimizer, step_size=num_epochs // 4, gamma=0.5
+    total_steps = 0
+    num_batches = 0
+    loss_sum = 0.0
+    eval_interval = 2_000
+    max_steps = 200_000
+    
+    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+    warmup_steps = 2_000
+    warmup_lambda = lambda step: min(1.0, (step + 1) / warmup_steps)
+    warmup_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_lambda)
+
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, 
+        mode='min', 
+        factor=0.5, 
+        patience=3,
+        min_lr = 1e-7,
     )
 
     scaler = amp.GradScaler()
+    stopper = EarlyStopper(patience=10, min_delta=1e-4)
+    best_metric = float("inf")
 
     for epoch in range(num_epochs):
+        train_loader.sampler.set_epoch(epoch)
         model.train()
-        train_sampler.set_epoch(epoch)
+        
+        for batch in tqdm(train_loader, desc=f"Epoch {epoch}"):
+            optimizer.zero_grad(set_to_none=True)
 
-        loss_sum_dict = {}
-        loss_sum = 0.0
-        num_batches = 0
-
-        for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch}")):
-            optimizer.zero_grad()
-            batch = [t.to(device) for t in batch]
+            batch = [t.to(device, non_blocking=True) for t in batch]
 
             with amp.autocast(device_type="cuda", dtype=torch.bfloat16):
                 output = model(batch, scene, scene_meta)
-                loss, loss_dict = loss_fn(output, batch, epoch)
+                loss, _loss_dict = loss_fn(output, batch, config=cfg)
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), norm_clip_value)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
             scaler.update()
 
             num_batches += 1
-            loss_sum += loss.item()
-            for loss_name, loss_val in loss_dict.items():
-                loss_sum_dict[loss_name] = (
-                    loss_sum_dict.get(loss_name, 0.0) + loss_val.item()
-                )
+            total_steps += 1
+            loss_sum += float(loss.item())
 
-        scheduler.step()
+            if total_steps <= warmup_steps:
+                warmup_scheduler.step()
 
-        loss_sum /= num_batches
-        loss_print = f"[Epoch {epoch}] train_loss={loss_sum:.4f}"
-        for loss_name, loss_val in loss_sum_dict.items():
-            loss_val /= num_batches
-            loss_print += f" {loss_name}={loss_val:.4f}"
-        logging.info(loss_print)
+            if total_steps % eval_interval == 0:
+                sub_epoch = int(total_steps//eval_interval)
 
-        if (epoch + 1) % 4 == 0:
-            optuna_loss = eval_fn(epoch, model, eval_loader, device, scene, scene_meta)
-            trial.report(optuna_loss, epoch)
-            if trial.should_prune():
-                raise optuna.exceptions.TrialPruned()
+                train_loss = loss_sum / max(1, num_batches)
+                logging.info(f"[Epoch {sub_epoch}] train_loss={train_loss:.4f}")
 
-    return optuna_loss
+                num_batches = 0
+                loss_sum = 0.0
 
+                with torch.no_grad():
+                    metric = eval_fn(
+                        sub_epoch, 
+                        model, 
+                        eval_loader, 
+                        device, 
+                        scene, 
+                        scene_meta, 
+                        trial_number=trial.number,
+                        config=cfg,
+                    )
+                model.train()
 
-def objective(trial: optuna.trial.Trial, gpu_id: int, args):
-    return tune_gpu(trial, gpu_id, args, **args["train_kwargs"])
+                metric = float(metric)
+                best_metric = min(best_metric, metric)
+                scheduler.step(metric)
 
+                # local early stopping based on *current val metric*
+                if (total_steps > warmup_steps):
+                    if stopper.step(metric):
+                        logging.info(f"[Epoch {sub_epoch}] Early stopping: best={stopper.best:.6f}")
+                        break
+                    if (total_steps >= max_steps):
+                        logging.info(f"[Epoch {sub_epoch}] Late stopping: best={stopper.best:.6f}")
+                        break
 
-if __name__ == "__main__":
+                # report to Optuna (so pruning can work)
+                trial.set_user_attr("epochs_ran", sub_epoch)
+                trial.report(best_metric, step=sub_epoch)
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
+
+        if stopper.stop or (total_steps >= max_steps):
+            break
+    return best_metric
+
+def make_objective(
+    model_choice: str,
+    data_folder: Path,
+    scene_path: Path,
+    scene_meta_path: Path,
+    pred_scope: str,
+    full_feat_set: bool,
+):
+    # pick model
+    if model_choice == "DESIRE":
+        model_cls, cfg, loss_fn, eval_fn = DESIRE, DESIREParams(), loss_desire, eval
+    elif model_choice == "LSTM":
+        model_cls, cfg, loss_fn, eval_fn = LSTMModel, LSTMParams(), mse, eval_lstm
+    elif model_choice == "TRAISFORMER":
+        model_cls, cfg, loss_fn, eval_fn = (
+            TrAISformer,
+            TraisformerParams(),
+            loss_occupancy_heatmap if pred_scope == "path" else loss_intent_heatmap,
+            eval_heatmap,
+        )
+    else:
+        raise ValueError(f"Unknown model_choice: {model_choice}")
+
+    def objective(trial: optuna.Trial):
+        # --- general params ---
+        lr = trial.suggest_float("lr", 1e-5, 5e-3, log=True)
+        weight_decay = trial.suggest_float("weight_decay",  1e-5, 1e-3, log=True)
+        batch_size = trial.suggest_categorical("batch_size", [32, 64, 128, 256])
+
+        # --- traisformer params ---
+        if (model_choice == "TRAISFORMER"):
+            cfg.pred_scope = pred_scope # "path", "destination"
+            cfg.full_feat_set = full_feat_set
+
+            if pred_scope == "path":
+                cfg.pred_len = 45 * 12
+
+            cfg.n_layer = trial.suggest_int("n_layer", 2, 8)
+            cfg.n_head = trial.suggest_categorical("n_head", [4, 8])
+            head_dim = trial.suggest_int("head_dim", 32, 96, step=16)
+            cfg.n_embd = cfg.n_head * head_dim
+
+            cat_meta = [("spatial", 1, 2), ("kinematic", 0, 2)]
+            if cfg.full_feat_set:
+                cat_meta += [("dynamic", 0, 2), ("terrain", 0, 1), ("vessel", 0, 1)]
+
+            end = 10
+            names, starts, costs = zip(*cat_meta)
+            splits = [trial.suggest_int(f"n_{name}", start, end) for name, start, _ in cat_meta]
+
+            embd = np.full(len(names), 8)
+            budget = (cfg.n_embd - 8*sum(costs)) // 8
+            while budget > 0:
+                for i in range(end):
+                    for k, cost in enumerate(costs):
+                        if budget >= cost and splits[k] > i:
+                            embd[k] += 8
+                            budget -= 8 * cost
+
+            for name, value in zip(names, embd):
+                setattr(cfg, f"n_{name}_embd", 8 + value)
+
+            cfg.dropout = trial.suggest_float("dropout", 0.0, 0.5, step=0.05)
+            cfg.attn_dropout = trial.suggest_float("attn_dropout", 0.0, 0.25, step=0.05)
+
+            cfg.coarse_loss_beta = trial.suggest_categorical("coarse_loss_beta", [0.0, 0.5, 1.0, 2.0])
+        try:
+            metric = train_single_gpu(
+                model_cls=model_cls,
+                cfg=cfg,
+                loss_fn=loss_fn,
+                eval_fn=eval_fn,
+                data_folder=data_folder,
+                scene_path=scene_path,
+                scene_meta_path=scene_meta_path,
+                batch_size=batch_size,
+                num_epochs=3,
+                lr=lr,
+                weight_decay=weight_decay,
+                trial=trial,
+            )
+            return metric
+        except torch.cuda.OutOfMemoryError:
+            logging.info("[ERROR] Out of memory!")
+            torch.cuda.empty_cache()
+            raise optuna.TrialPruned()
+
+    return objective
+
+def run_worker():
+    """
+    One worker process. It sees exactly ONE GPU because launcher sets CUDA_VISIBLE_DEVICES.
+    All workers share the same Optuna storage to coordinate trials.
+    """
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.set_float32_matmul_precision("high")
 
-    local_rank = int(os.environ.get("LOCAL_RANK", 0))
-
-    model_options = ["DESIRE", "LSTM"]
-    model_choise = model_options[1]
-
-    logger(file_prefix=f"train_server_{model_choise}_rank_{local_rank}")
-
-    if model_choise == "DESIRE":
-        model = DESIRE
-        model_params = DESIREParams()
-        model_hyper_params = {}
-        loss_fn = loss_desire
-        eval_fn = eval
-
-    if model_choise == "LSTM":
-        model = LSTMModel
-        model_params = LSTMParams()
-        model_hyper_params = {"hidden_size": [64, 128, 256]}
-        loss_fn = eval_loss
-        eval_fn = eval
-
-    args = {
-        "model_params": model_params,
-        "model_hyper_params": model_hyper_params,
-        "train_kwargs": {
-            "model": model,
-            "loss_fn": loss_fn,
-            "data_folder": Path("/home/bbiesenbach/data/kiel/ais/3_features"),
-            "scene_path": Path("data/kiel/scenes/bev.npz"),
-            "scene_meta_path": Path("data/kiel/scenes/bev_meta.json"),
-            "num_epochs": 64,
-            "eval_fn": eval_fn,
-        },
-    }
-
-    study = optuna.create_study(
-        direction="minimize", pruner=optuna.pruners.MedianPruner()
+    model_choice = os.environ.get("MODEL_CHOICE", "TRAISFORMER")
+    storage = os.environ.get(
+        "OPTUNA_STORAGE", f"sqlite:///optuna_{model_choice.lower()}.db"
     )
+    study_name = os.environ.get("OPTUNA_STUDY", f"hpo_{model_choice.lower()}")
+
+    # Shared JSONL path (same for all workers)
+    jsonl_path = Path(os.environ.get("OPTUNA_JSONL", f"optuna_{study_name}.jsonl"))
+
+    # your paths
+    data_folder = Path("/data/projects/ship_tracker/assets/ais/4_features/fh/kiel")
+    scene_path = Path("data/kiel/scenes/bev.npz")
+    scene_meta_path = Path("data/kiel/scenes/bev_meta.json")
+
+    logger(file_prefix=f"optuna_worker_{model_choice}")
+    logging.info(study_name)
+
+    sampler = optuna.samplers.TPESampler(
+        multivariate=True, 
+        constant_liar=True,
+    )
+
+    pruner = optuna.pruners.MedianPruner(
+        n_startup_trials=10, 
+        n_warmup_steps=10,
+    )
+
     study = optuna.create_study(
-        study_name=f"study_{model_choise}",
-        storage="sqlite:///db.sqlite3",
+        study_name=study_name,
+        storage=storage,
         direction="minimize",
-        pruner=optuna.pruners.MedianPruner(),
         load_if_exists=True,
+        sampler=sampler,
+        pruner=pruner,
     )
-    study.optimize(
-        lambda trial: objective(trial, local_rank, args),
-        n_trials=20 // int(os.environ.get("WORLD_SIZE", 1)),
+
+    objective = make_objective(
+        model_choice=model_choice,
+        data_folder=data_folder,
+        scene_path=scene_path,
+        scene_meta_path=scene_meta_path,
+        pred_scope = "path", # "path" "destination"
+        full_feat_set= True,
     )
-    if local_rank == 0:
-        logging.info(f"Best trial: {study.best_trial.value}")
-        logging.info(f"Best params: {study.best_trial.params}")
+
+    cb = trial_jsonl_callback(jsonl_path)
+
+    study.optimize(objective, n_trials=50, gc_after_trial=True, callbacks=[cb])
+
+    if study.best_trial is not None:
+        logging.info(f"BEST value={study.best_value}")
+        logging.info(f"BEST params={study.best_params}")
+
+if __name__ == "__main__":
+    run_worker()
+
+"""
+CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///obs_len_lstm.db" OPTUNA_STUDY="obs_len_lstm" OPTUNA_JSONL="obs_len_lstm.jsonl" python -u src/train/train_tune.py
+
+CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_dest_light.db" OPTUNA_STUDY="traisformer_dest_light" OPTUNA_JSONL="traisformer_dest_light.jsonl" python -u src/train/train_tune.py
+CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_dest_full.db" OPTUNA_STUDY="traisformer_dest_full" OPTUNA_JSONL="traisformer_dest_full.jsonl" python -u src/train/train_tune.py
+
+CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_path_light.db" OPTUNA_STUDY="traisformer_path_light" OPTUNA_JSONL="traisformer_path_light.jsonl" python -u src/train/train_tune.py
+CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_path_full.db" OPTUNA_STUDY="traisformer_path_full" OPTUNA_JSONL="traisformer_path_full.jsonl" python -u src/train/train_tune.py
+"""

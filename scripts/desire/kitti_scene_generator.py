@@ -93,7 +93,7 @@ if __name__ == "__main__":
     scene = np.stack([land, dist], axis=0).astype(np.float32)
 
     # save scene
-    out_dir = Path("data/scenes/fhkiel_train/kiel").resolve()
+    out_dir = Path("data/scenes/fh/kiel").resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out_dir / "bev.npz", I=scene)
 

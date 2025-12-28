@@ -60,24 +60,25 @@ def train_cpu(
 
     # --- CPU device ---
     device = torch.device("cpu")
-    torch.set_num_threads(max(1, torch.get_num_threads()))
+    torch.set_num_threads(min(8, max(1, torch.get_num_threads())))
     print(f"Starting training on {device}")
 
     # --- DataLoaders (single-process, no DDP) ---
     train_dset, train_sampler, train_loader = sceen_loader(
-        data_folder=data_folder,
-        min_date=pd.Timestamp("2022-05-03"),
-        max_date=pd.Timestamp("2023-05-03"),
+        data_folder=data_folder / "fhkiel_train/kiel",
+        min_date=pd.Timestamp("2022-01-01"),
+        max_date=pd.Timestamp("2022-05-16"), # hyper: 2022-05-16, full: 2024-01-01
         world_size=1,
         rank=0,
         batch_size=batch_size,
         pin_memory=False,
         feat_cols=["speed", "course"],
     )
+
     eval_dset, eval_sampler, eval_loader = sceen_loader(
-        data_folder=data_folder,
-        min_date=pd.Timestamp("2022-05-03"),
-        max_date=pd.Timestamp("2023-05-03"),
+        data_folder=data_folder / "fhkiel_val/kiel",
+        min_date=pd.Timestamp("2022-01-01"),
+        max_date=pd.Timestamp("2023-03-25"), # hyper: 2023-03-25, full: 2024-01-01 
         world_size=1,
         rank=0,
         batch_size=batch_size,

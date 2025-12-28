@@ -1,13 +1,14 @@
 from datetime import timedelta
 from pathlib import Path
-
+import joblib
+import os
 import numpy as np
 import pandas as pd
 import pyproj
 import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
-
+from sceen_loader.normalizer import normalize
 
 def seq_collate(data):
     (
@@ -162,27 +163,35 @@ class SceenTrajectoryDataset(Dataset):
         min_date: pd.Timestamp,
         max_date: pd.Timestamp,
         feat_cols=[],
-        obs_len=8,
-        pred_len=12,
+        obs_len=24,
+        pred_len=24,
         exclude_ship_types=list(range(0, 40)),
+        force_rebuild=True,
+        normalizer_path = None,
     ):
-        """
-        Args:
-        - data_dir: Directory containing dataset files in the format
-        <frame_id> <ped_id> <x> <y>
-        - obs_len: Number of time-steps in input trajectories
-        - pred_len: Number of time-steps in output trajectories
-        - skip: Number of frames to skip while making the dataset
-        - threshold: Minimum error to be considered for non linear traj
-        when using a linear predictor
-        - min_ped: Minimum number of pedestrians that should be in a seqeunce
-        - delim: Delimiter in the dataset files
-        """
         super(SceenTrajectoryDataset, self).__init__()
-        self.items = []
-        self.data = {}
         self.obs_len = obs_len
         self.pred_len = pred_len
+
+        # load from cache
+        folder_name = nodes_path.parent.parent.name + nodes_path.parent.name
+        feature_name = "".join([f[0] for f in feat_cols])
+        cache_name = (
+            f"sceen_loader_{min_date.date()}_{max_date.date()}_"
+            f"{obs_len}_{pred_len}__{feature_name}_{folder_name}"
+        )
+        cache_path = Path("data/cache") / f"{cache_name}.pkl"
+        os.makedirs(cache_path.parent, exist_ok=True)
+
+        if cache_path.exists() and not force_rebuild:
+            print(f"Loading dataset from cache: {cache_path}")
+            self.items, self.data, self.feature_cols = joblib.load(cache_path)
+            return
+
+        print(f"Cache not found: {cache_path}. Processing dataset...")
+
+        self.items = []
+        self.data = {}
         self.feature_cols = feat_cols
 
         nodes = pd.read_parquet(nodes_path)
@@ -194,7 +203,7 @@ class SceenTrajectoryDataset(Dataset):
             raise ValueError("There are no values within the given time range.")
 
         # TODO config
-        ship_db_path = Path("data/ais/ship_db/ship_db.parquet")
+        ship_db_path = Path("/data/projects/ais/data/ship_db/ship_db.parquet")
         ship_db = pd.read_parquet(ship_db_path)
         nodes = nodes.reset_index().merge(ship_db, on="mmsi")
 
@@ -203,28 +212,55 @@ class SceenTrajectoryDataset(Dataset):
         )
 
         edges = pd.read_parquet(edges_path)
-        edges = process_time(edges, min_date, max_date, step_size)
         edges = edges.reset_index().drop(columns=["timestamp"])
+        edges = process_time(edges, min_date, max_date, step_size)
         risk_mmsi = edges.sort_values(
             ["collision_risk", "dist"], ascending=[False, True]
         ).drop_duplicates(subset=["time", "mmsi"], keep="first")
 
+        # TODO cleanup of columns
+        nodes = nodes.fillna(0)
+
         nodes = nodes.merge(risk_mmsi, on=["time", "mmsi"])
         nodes = nodes.set_index("time").sort_index()
 
-        nodes = nodes[["mmsi", "lat", "lon"] + self.feature_cols]
-        nodes = cords_to_meters(nodes)
-        self.feature_cols = [
-            col.replace("lon", "x").replace("lat", "y") for col in self.feature_cols
-        ]
+        nodes["length"] = nodes['to_bow'] + nodes['to_stern']
+        nodes["width"] = nodes['to_port'] + nodes['to_starboard']
 
+        nodes["density"] = nodes["density_all"]
+        for group in ["sailing", "cargo", "passenger"]:
+            mask = nodes["ship_group"] == group
+            nodes.loc[mask, "density"] = nodes.loc[mask, f"density_{group}"]
+
+        for col in ['density_all', 'density_sailing', 'density_cargo',
+            'density_other', 'density_passenger', 'density']:
+            nodes[col] = np.log1p(nodes[col])
+
+        nodes = nodes[["mmsi", "lat", "lon"] + self.feature_cols]
+        nodes = normalize(nodes, normalizer_path, cache_name)
+        self.feature_cols = nodes.columns
+
+        nodes = cords_to_meters(nodes)
+        self.feature_cols = [col.replace("lon", "x") for col in self.feature_cols]
+        self.feature_cols = [col.replace("lat", "y") for col in self.feature_cols]
+
+
+        nodes = nodes.sort_index()
         for cur_t in tqdm(range(nodes.index[0], nodes.index[-1])):
             self._add_items_at_t(nodes, cur_t, exclude_mmsi)
 
+        # build per-mmsi DataFrames (then convert to numpy)
         for mmsi, group in tqdm(nodes.groupby("mmsi")):
-            df = add_filled_gap_steps(group, pred_len)
+            df = add_filled_gap_steps(group, self.pred_len)
             df = add_rel_pos(df)
             self.data[mmsi] = df
+
+        # finally convert self.data to numpy representation
+        self._to_numpy()
+
+        print(f"Saving dataset to cache: {cache_path}")
+        joblib.dump((self.items, self.data, self.feature_cols), cache_path)
+
 
     def _add_items_at_t(self, nodes, cur_t, exclude_mmsi):
         nodes_t = nodes.loc[cur_t - self.obs_len : cur_t + self.pred_len - 1]
@@ -258,16 +294,31 @@ class SceenTrajectoryDataset(Dataset):
         fut_pos_rel = []
 
         for mmsi in sceen_mmsi:
-            df = self.data[mmsi]
-            obs_df = df.loc[cur_t - self.obs_len : cur_t - 1]
-            fut_df = df.loc[cur_t : cur_t + self.pred_len - 1]
+            entry = self.data[mmsi]
+            idx_map = entry["time_to_idx"]
 
-            obs_feat.append(obs_df[self.feature_cols].values)
-            obs_pos.append(obs_df[["x", "y"]].values)
-            obs_pos_rel.append(obs_df[["rel_x", "rel_y"]].values)
-            fut_pos.append(fut_df[["x", "y"]].values)
-            fut_pos_rel.append(fut_df[["rel_x", "rel_y"]].values)
+            # Build index lists from actual time stamps, so gaps are fine
+            try:
+                obs_idx = [
+                    idx_map[cur_t - self.obs_len + k] for k in range(self.obs_len)
+                ]
+                fut_idx = [
+                    idx_map[cur_t + k] for k in range(self.pred_len)
+                ]
+            except KeyError as e:
+                # This *shouldn't* happen because _add_items_at_t only keeps
+                # complete trajectories. If it does, fail loudly so you can inspect.
+                raise ValueError(
+                    f"Missing time {e.args[0]} for mmsi {mmsi} at cur_t={cur_t}"
+                )
 
+            obs_feat.append(entry["feat"][obs_idx, :])
+            obs_pos.append(entry["pos"][obs_idx, :])
+            obs_pos_rel.append(entry["pos_rel"][obs_idx, :])
+            fut_pos.append(entry["pos"][fut_idx, :])
+            fut_pos_rel.append(entry["pos_rel"][fut_idx, :])
+
+        # Now all lists have consistent shapes: [N, obs_len/pred_len, C]
         obs_feat = self._to_tensor(obs_feat)
         obs_pos = self._to_tensor(obs_pos)
         obs_pos_rel = self._to_tensor(obs_pos_rel)
@@ -278,4 +329,46 @@ class SceenTrajectoryDataset(Dataset):
         return obs_feat, obs_pos, obs_pos_rel, fut_pos, fut_pos_rel, train_mask
 
     def _to_tensor(self, traj):
+        # traj: list of numpy arrays [T, C] -> tensor [N, C, T]
         return torch.tensor(np.stack(traj, axis=0)).permute(0, 2, 1).float()
+
+    def _to_numpy(self):
+        """
+        Convert self.data[mmsi] from DataFrames into compact numpy arrays
+        plus a time->index lookup, so that we can index by actual time
+        labels even if the index has gaps.
+
+        After this:
+            self.data[mmsi] = {
+                "times": np.ndarray,        # [T]
+                "time_to_idx": dict[int,int],
+                "feat": np.ndarray,         # [T, F]
+                "pos": np.ndarray,          # [T, 2]  (x, y)
+                "pos_rel": np.ndarray,      # [T, 2]  (rel_x, rel_y)
+            }
+        """
+        for mmsi, df in list(self.data.items()):
+            # Already converted?
+            if isinstance(df, dict) and "feat" in df:
+                continue
+
+            df = df.sort_index()
+            times = df.index.to_numpy()
+
+            feat = df[self.feature_cols].to_numpy(dtype=np.float32)
+            pos = df[["x", "y"]].to_numpy(dtype=np.float32)
+            pos_rel = df[["rel_x", "rel_y"]].to_numpy(dtype=np.float32)
+
+            # Map actual time label -> row index
+            # int(...) makes keys plain Python ints (cur_t from range(...) is also int)
+            time_to_idx = {int(t): i for i, t in enumerate(times)}
+
+            self.data[mmsi] = {
+                "times": times,
+                "time_to_idx": time_to_idx,
+                "feat": feat,
+                "pos": pos,
+                "pos_rel": pos_rel,
+            }
+
+

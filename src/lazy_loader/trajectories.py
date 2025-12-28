@@ -120,21 +120,11 @@ def add_rel_pos(df: pd.DataFrame):
 
 
 def cords_to_meters(df: pd.DataFrame):
-    latlon_cols = [col for col in df.columns if "lat" in col or "lon" in col]
-    if len(latlon_cols) % 2 != 0:
-        raise ValueError(f"Uneven number of lat/lon columns: {latlon_cols}")
-
     # TODO get CRS from config
     transformer = pyproj.Transformer.from_crs(
         pyproj.CRS("EPSG:4326"), pyproj.CRS("EPSG:25832"), always_xy=True
     )
-    for i in range(0, len(latlon_cols), 2):
-        lon_col = latlon_cols[i] if "lon" in latlon_cols[i] else latlon_cols[i + 1]
-        lat_col = latlon_cols[i] if "lat" in latlon_cols[i] else latlon_cols[i + 1]
-        df[lon_col], df[lat_col] = transformer.transform(
-            df[lon_col].values, df[lat_col].values
-        )
-    df.columns = [col.replace("lon", "x").replace("lat", "y") for col in df.columns]
+    df["x"], df["y"] = transformer.transform(df["lon"].values, df["lat"].values)
     return df
 
 

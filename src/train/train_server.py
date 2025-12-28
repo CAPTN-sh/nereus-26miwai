@@ -17,7 +17,12 @@ from models.desire.nn.loss import loss_desire
 from models.desire.utils.params import DESIREParams
 from models.lstm.model import LSTMModel
 from models.lstm.params import LSTMParams
+from models.traisformer.loss import loss_intent_heatmap
+from models.traisformer.model import TrAISformer
+from models.traisformer.params import TraisformerParams
+from train.eval_heatmap import eval_heatmap
 from sceen_loader.loader import sceen_loader
+from static_loader.loader import static_loader
 from train.eval import eval, eval_loss
 from utils.logger import logger
 
@@ -27,7 +32,9 @@ os.environ["OMP_NUM_THREADS"] = "4"
 def train_worker(
     dist_args,
     model,
+    cfg,
     loss_fn,
+    eval_fn,
     data_folder: Path,
     scene_path: Path,
     scene_meta_path: Path,
@@ -44,33 +51,33 @@ def train_worker(
     logging.info(f"[Rank {rank}] Starting training on {device}")
 
     ### --- DataLoader --- ###
-    train_dset, train_sampler, train_loader = sceen_loader(
+    train_dset, train_sampler, train_loader = static_loader(
         data_folder=data_folder,
-        min_date=pd.Timestamp("2022-04-14"),
-        max_date=pd.Timestamp("2022-04-16"),
+        flag = "train",
+        min_date=pd.Timestamp("2022-01-01"),
+        max_date=pd.Timestamp("2024-01-01"),
         world_size=world_size,
         rank=rank,
         batch_size=batch_size,
         pin_memory=True,
+        feat_cols=["speed", "course"],
     )
 
-    eval_dset, eval_sampler, eval_loader = sceen_loader(
+    eval_dset, eval_sampler, eval_loader = static_loader(
         data_folder=data_folder,
-        min_date=pd.Timestamp("2022-06-01"),
-        max_date=pd.Timestamp("2022-06-01"),
+        flag = "val",
+        min_date=pd.Timestamp("2022-01-01"),
+        max_date=pd.Timestamp("2024-01-01"),
         world_size=world_size,
         rank=rank,
         batch_size=batch_size,
         pin_memory=True,
+        feat_cols=["speed", "course"],
     )
-
-    if rank == 0:
-        logging.info(f"[Train] model: {model.__class__.__name__}")
-        # logging.info(f"additional features: {train_dset.feature_cols}")
-        logging.info(f"There are {len(train_dset)} traj loaded for training")
-        logging.info(f"There are {len(eval_dset)} traj loaded for evaluation")
 
     ### --- Model --- ###
+
+    model = model(cfg)
 
     npz = np.load(scene_path)
     scene = torch.from_numpy(npz["I"]).unsqueeze(0).to(device)  # TODO unsqueeze?
@@ -82,6 +89,13 @@ def train_worker(
 
     model = DDP(model.to(device), device_ids=[local_rank], output_device=local_rank)
 
+    if rank == 0:
+        logging.info(f"[Train] model: {model.module.__class__.__name__}")
+        # logging.info(f"additional features: {train_dset.feature_cols}")
+        logging.info(f"There are {len(train_dset)} traj loaded for training")
+        logging.info(f"There are {len(eval_dset)} traj loaded for evaluation")
+
+    # optimizer = optim.Adam(model.parameters(), lr=lr)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = optim.lr_scheduler.StepLR(
         optimizer, step_size=num_epochs // 4, gamma=0.5
@@ -129,8 +143,8 @@ def train_worker(
                 loss_print += f" {loss_name}={loss_val:.4f}"
             logging.info(loss_print)
 
-        if (epoch + 1) % 4 == 0:
-            eval(epoch, model.module, eval_loader, device, scene, scene_meta)
+        # if (epoch + 1) % 4 == 0:
+        eval_fn(epoch, model.module, eval_loader, device, scene, scene_meta)
     dist.destroy_process_group()
 
 
@@ -146,35 +160,43 @@ if __name__ == "__main__":
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.set_float32_matmul_precision("high")
 
-    model_options = ["DESIRE", "LSTM"]
-    model_choise = model_options[0]
+    model_options = ["DESIRE", "LSTM", "TRAISFORMER"]
+    model_choise = model_options[2]
 
     logger(file_prefix=f"train_server_{model_choise}")
     dist_args = get_distributed_args()
 
     if model_choise == "DESIRE":
-        model = DESIRE(DESIREParams())
+        model = DESIRE
+        cfg = DESIREParams()
         loss_fn = loss_desire
         eval_fn = eval
 
     if model_choise == "LSTM":
         model = LSTMModel
-        model_params = LSTMParams()
-        model_hyper_params = {"hidden_size": [32, 64, 128]}
+        cfg = LSTMParams()
         loss_fn = eval_loss
         eval_fn = eval
 
-    data_folder = Path("/home/bbiesenbach/data/kiel/ais/3_features")
+    if model_choise == "TRAISFORMER":
+        model = TrAISformer
+        cfg = TraisformerParams()
+        loss_fn = loss_intent_heatmap
+        eval_fn = eval_heatmap
+
+    data_folder = Path("/data/projects/ship_tracker/assets/ais/4_features/fh/kiel")
     scene_path = Path("data/kiel/scenes/bev.npz")
     scene_meta_path = Path("data/kiel/scenes/bev_meta.json")
 
     train_worker(
         dist_args,
         model=model,
+        cfg=cfg,
         loss_fn=loss_fn,
+        eval_fn=eval_fn,
         data_folder=data_folder,
         scene_path=scene_path,
         scene_meta_path=scene_meta_path,
-        num_epochs=64,
-        batch_size=4 * 2048,
+        num_epochs = 10,
+        batch_size = 2 * 2048,
     )
