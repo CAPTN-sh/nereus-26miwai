@@ -153,28 +153,27 @@ def train_single_gpu(
     scene = torch.from_numpy(scene_contiguous).unsqueeze(0).to(device)
     scene_meta = None
 
-    total_steps = 0
+    total_batches = 0
     num_batches = 0
     loss_sum = 0.0
-    eval_interval = 2_000
-    max_steps = 200_000
+    SAMPLES_PER_EVAL = 256_000 # 20_783_360 total samples
+    batches_per_eval = SAMPLES_PER_EVAL // batch_size
     
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    warmup_steps = 2_000
-    warmup_lambda = lambda step: min(1.0, (step + 1) / warmup_steps)
+    warmup_batches = batches_per_eval
+    warmup_lambda = lambda step: min(1.0, (step + 1) / warmup_batches)
     warmup_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_lambda)
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, 
-        mode='min', 
         factor=0.5, 
-        patience=3,
+        patience=4,
         min_lr = 1e-7,
     )
 
     scaler = amp.GradScaler()
-    stopper = EarlyStopper(patience=10, min_delta=1e-4)
+    stopper = EarlyStopper(patience=15, min_delta=1e-4)
     best_metric = float("inf")
 
     for epoch in range(num_epochs):
@@ -197,24 +196,24 @@ def train_single_gpu(
             scaler.update()
 
             num_batches += 1
-            total_steps += 1
+            total_batches += 1
             loss_sum += float(loss.item())
 
-            if total_steps <= warmup_steps:
+            if total_batches <= warmup_batches:
                 warmup_scheduler.step()
 
-            if total_steps % eval_interval == 0:
-                sub_epoch = int(total_steps//eval_interval)
+            if total_batches % batches_per_eval == 0:
+                eval_step = int(total_batches//batches_per_eval)
 
                 train_loss = loss_sum / max(1, num_batches)
-                logging.info(f"[Epoch {sub_epoch}] train_loss={train_loss:.4f}")
+                logging.info(f"[Eval Step {eval_step}] train_loss={train_loss:.4f}")
 
                 num_batches = 0
                 loss_sum = 0.0
 
                 with torch.no_grad():
                     metric = eval_fn(
-                        sub_epoch, 
+                        eval_step, 
                         model, 
                         eval_loader, 
                         device, 
@@ -228,23 +227,20 @@ def train_single_gpu(
                 metric = float(metric)
                 best_metric = min(best_metric, metric)
                 scheduler.step(metric)
-
-                # local early stopping based on *current val metric*
-                if (total_steps > warmup_steps):
-                    if stopper.step(metric):
-                        logging.info(f"[Epoch {sub_epoch}] Early stopping: best={stopper.best:.6f}")
-                        break
-                    if (total_steps >= max_steps):
-                        logging.info(f"[Epoch {sub_epoch}] Late stopping: best={stopper.best:.6f}")
-                        break
-
+                
                 # report to Optuna (so pruning can work)
-                trial.set_user_attr("epochs_ran", sub_epoch)
-                trial.report(best_metric, step=sub_epoch)
+                trial.report(best_metric, step=eval_step)
+                trial.set_user_attr("epochs_ran", eval_step)
                 if trial.should_prune():
                     raise optuna.TrialPruned()
 
-        if stopper.stop or (total_steps >= max_steps):
+                # local early stopping based on *current val metric*
+                if (total_batches > warmup_batches):
+                    if stopper.step(metric):
+                        logging.info(f"[Eval Step {eval_step}] Early stopping: best={stopper.best:.6f}")
+                        break
+
+        if stopper.stop:
             break
     return best_metric
 
@@ -273,13 +269,14 @@ def make_objective(
 
     def objective(trial: optuna.Trial):
         # --- general params ---
-        lr = trial.suggest_float("lr", 1e-5, 5e-3, log=True)
-        weight_decay = trial.suggest_float("weight_decay",  1e-5, 1e-3, log=True)
         batch_size = trial.suggest_categorical("batch_size", [32, 64, 128, 256])
+        base_lr = trial.suggest_float("base_lr", 1e-5, 1e-3, log=True)
+        lr = base_lr * (batch_size / 64) ** 0.5
+        weight_decay = trial.suggest_float("weight_decay",  1e-5, 1e-3, log=True)
 
         # --- traisformer params ---
         if (model_choice == "TRAISFORMER"):
-            cfg.pred_scope = pred_scope # "path", "destination"
+            cfg.pred_scope = pred_scope
             cfg.full_feat_set = full_feat_set
 
             if pred_scope == "path":
@@ -294,14 +291,13 @@ def make_objective(
             if cfg.full_feat_set:
                 cat_meta += [("dynamic", 0, 2), ("terrain", 0, 1), ("vessel", 0, 1)]
 
-            end = 10
             names, starts, costs = zip(*cat_meta)
-            splits = [trial.suggest_int(f"n_{name}", start, end) for name, start, _ in cat_meta]
+            splits = [trial.suggest_int(f"n_{name}", start, 4) for name, start, _ in cat_meta]
 
             embd = np.full(len(names), 8)
             budget = (cfg.n_embd - 8*sum(costs)) // 8
             while budget > 0:
-                for i in range(end):
+                for i in range(4):
                     for k, cost in enumerate(costs):
                         if budget >= cost and splits[k] > i:
                             embd[k] += 8
@@ -324,7 +320,7 @@ def make_objective(
                 scene_path=scene_path,
                 scene_meta_path=scene_meta_path,
                 batch_size=batch_size,
-                num_epochs=3,
+                num_epochs=1,
                 lr=lr,
                 weight_decay=weight_decay,
                 trial=trial,
@@ -369,8 +365,8 @@ def run_worker():
     )
 
     pruner = optuna.pruners.MedianPruner(
-        n_startup_trials=10, 
-        n_warmup_steps=10,
+        n_startup_trials=10,
+        n_warmup_steps=15,
     )
 
     study = optuna.create_study(
@@ -387,7 +383,7 @@ def run_worker():
         data_folder=data_folder,
         scene_path=scene_path,
         scene_meta_path=scene_meta_path,
-        pred_scope = "path", # "path" "destination"
+        pred_scope = "destination", # "path" "destination"
         full_feat_set= True,
     )
 
@@ -405,9 +401,9 @@ if __name__ == "__main__":
 """
 CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///obs_len_lstm.db" OPTUNA_STUDY="obs_len_lstm" OPTUNA_JSONL="obs_len_lstm.jsonl" python -u src/train/train_tune.py
 
-CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_dest_light.db" OPTUNA_STUDY="traisformer_dest_light" OPTUNA_JSONL="traisformer_dest_light.jsonl" python -u src/train/train_tune.py
-CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_dest_full.db" OPTUNA_STUDY="traisformer_dest_full" OPTUNA_JSONL="traisformer_dest_full.jsonl" python -u src/train/train_tune.py
+CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_dest_light.db" OPTUNA_STUDY="traisformer_dest_light" OPTUNA_JSONL="traisformer_dest_light.jsonl" python -u src/train/train_tune.py
+CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_dest_full.db" OPTUNA_STUDY="traisformer_dest_full" OPTUNA_JSONL="traisformer_dest_full.jsonl" python -u src/train/train_tune.py
 
-CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_path_light.db" OPTUNA_STUDY="traisformer_path_light" OPTUNA_JSONL="traisformer_path_light.jsonl" python -u src/train/train_tune.py
+CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_path_light.db" OPTUNA_STUDY="traisformer_path_light" OPTUNA_JSONL="traisformer_path_light.jsonl" python -u src/train/train_tune.py
 CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_path_full.db" OPTUNA_STUDY="traisformer_path_full" OPTUNA_JSONL="traisformer_path_full.jsonl" python -u src/train/train_tune.py
 """
