@@ -21,15 +21,15 @@ class TraisformerParams:
     # state_embd
     n_spatial_embd: int = 128
     n_kinematic_embd: int = 64
-    n_dynamic_embd: int = 32
+    n_dynamic_embd: int = 0
 
     n_chanels: int = 4
-    n_terrain_embd: int = 64
+    n_terrain_embd: int = 0
 
     n_vessel_feat: int = 5
-    n_vessel_embd: int = 32
+    n_vessel_embd: int = 0
 
-    n_embd = 2 * (128 + 64 + 32) + 64 + 32
+    n_embd = 2*128 + 2*64
 
     # Dropouts
     dropout: float = 0.1

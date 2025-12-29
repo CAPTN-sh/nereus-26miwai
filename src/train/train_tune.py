@@ -289,7 +289,7 @@ def make_objective(
 
             cfg.n_layer = trial.suggest_int("n_layer", 2, 8, step=2)
             cfg.n_head = trial.suggest_categorical("n_head", [4, 8])
-            head_dim = trial.suggest_int("head_dim", 32, 96, step=32)
+            head_dim = trial.suggest_int("head_dim", 32, 128, step=32)
             cfg.n_embd = cfg.n_head * head_dim
 
             cat_meta = [("spatial", [4], 2), ("kinematic", [0,1,2,4], 2)]
@@ -304,7 +304,7 @@ def make_objective(
             embd[np.argsort(-(np.array(splits) * budget / sum(splits) % 1))[:budget - embd.sum()]] += 1
 
             for name, cost, value in zip(names, costs, embd):
-                setattr(cfg, f"n_{name}_embd", value * 16 // costs)
+                setattr(cfg, f"n_{name}_embd", int(value * 16 // cost))
 
             cfg.dropout = trial.suggest_float("dropout", 0.0, 0.3, step=0.05)
             cfg.attn_dropout = trial.suggest_float("attn_dropout", 0.0, 0.2, step=0.05)
@@ -385,7 +385,7 @@ def run_worker():
         scene_path=scene_path,
         scene_meta_path=scene_meta_path,
         pred_scope = "destination", # "path" "destination"
-        full_feat_set=False,
+        full_feat_set=True,
     )
 
     cb = trial_jsonl_callback(jsonl_path)

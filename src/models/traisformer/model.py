@@ -34,7 +34,7 @@ class TrAISformer(nn.Module):
         if config.n_vessel_embd > 0:
             self.vessel_embd = nn.Linear(config.n_vessel_feat, config.n_vessel_embd)
 
-        config.n_embd = 2*config.n_spatial_embd + 2*config.n_kinematic_embd + 2*config.n_dynamic_embd + config.n_terrain_embd + config.n_vessel_embd
+        # config.n_embd = 2*config.n_spatial_embd + 2*config.n_kinematic_embd + 2*config.n_dynamic_embd + config.n_terrain_embd + config.n_vessel_embd
 
         self.pos_emb = nn.Parameter(torch.zeros(1, config.obs_len, config.n_embd))
         self.drop = nn.Dropout(config.dropout)
