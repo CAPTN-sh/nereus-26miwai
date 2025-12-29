@@ -105,8 +105,8 @@ def train_single_gpu(
 
     logging.info("#" * 20)
     logging.info(f"[Trial] number={trial.number}")
-    formatted_params = {k: round(v, 7) if isinstance(v, float) else v for k, v in trial.params.items()}
-    logging.info(f"[Trial] params={formatted_params}")
+    trial_settings = {k: round(v, 6) if isinstance(v, float) else v for k, v in trial.params.items()}
+    logging.info(f"[Trial {trial.number}] {trial_settings}")
 
     train_dset, _, train_loader = loader_heatmap(
         data_folder=data_folder,
@@ -243,9 +243,8 @@ def train_single_gpu(
                         logging.info(f"[Eval Step {eval_step}] Early stopping: best={stopper.best:.6f}")
                         break
                 if (total_batches >= max_batches):
-                    if stopper.step(metric):
-                        logging.info(f"[Eval Step {eval_step}] Late stopping: best={stopper.best:.6f}")
-                        break
+                    logging.info(f"[Eval Step {eval_step}] Late stopping: best={stopper.best:.6f}")
+                    break
 
         if stopper.stop or (total_batches >= max_batches):
             break
@@ -277,8 +276,8 @@ def make_objective(
     def objective(trial: optuna.Trial):
         # --- general params ---
         batch_size = trial.suggest_categorical("batch_size", [256])
-        lr = trial.suggest_float("lr", 1e-5, 5e-3, log=True)
-        weight_decay = trial.suggest_float("weight_decay",  1e-5, 1e-3, log=True)
+        lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
+        weight_decay = trial.suggest_float("weight_decay",  1e-6, 1e-3, log=True)
 
         # --- traisformer params ---
         if (model_choice == "TRAISFORMER"):
@@ -288,32 +287,27 @@ def make_objective(
             if pred_scope == "path":
                 cfg.pred_len = 45 * 12
 
-            cfg.n_layer = trial.suggest_int("n_layer", 2, 8)
+            cfg.n_layer = trial.suggest_int("n_layer", 2, 8, step=2)
             cfg.n_head = trial.suggest_categorical("n_head", [4, 8])
-            head_dim = trial.suggest_int("head_dim", 32, 96, step=16)
+            head_dim = trial.suggest_int("head_dim", 32, 96, step=32)
             cfg.n_embd = cfg.n_head * head_dim
 
-            cat_meta = [("spatial", 1, 2), ("kinematic", 0, 2)]
+            cat_meta = [("spatial", [4], 2), ("kinematic", [0,1,2,4], 2)]
             if cfg.full_feat_set:
-                cat_meta += [("dynamic", 0, 2), ("terrain", 0, 1), ("vessel", 0, 1)]
+                cat_meta += [("dynamic", [0,1,2,4], 2), ("terrain", [0,1,2,4], 1), ("vessel", [0,1,2,4], 1)]
 
-            names, starts, costs = zip(*cat_meta)
-            splits = [trial.suggest_int(f"n_{name}", start, 4) for name, start, _ in cat_meta]
+            names, _, costs = zip(*cat_meta)
+            splits = [trial.suggest_categorical(f"n_{n}", r) for n, r, c in cat_meta]
+            budget = (cfg.n_embd) // 16
 
-            embd = np.full(len(names), 8)
-            budget = (cfg.n_embd - 8*sum(costs)) // 8
-            while budget > 0:
-                for i in range(4):
-                    for k, cost in enumerate(costs):
-                        if budget >= cost and splits[k] > i:
-                            embd[k] += 8
-                            budget -= 8 * cost
+            embd = np.array([int(s * budget / sum(splits)) for s in splits])
+            embd[np.argsort(-(np.array(splits) * budget / sum(splits) % 1))[:budget - embd.sum()]] += 1
 
-            for name, value in zip(names, embd):
-                setattr(cfg, f"n_{name}_embd", 8 + value)
+            for name, cost, value in zip(names, costs, embd):
+                setattr(cfg, f"n_{name}_embd", value * 16 // costs)
 
-            cfg.dropout = trial.suggest_float("dropout", 0.0, 0.5, step=0.05)
-            cfg.attn_dropout = trial.suggest_float("attn_dropout", 0.0, 0.25, step=0.05)
+            cfg.dropout = trial.suggest_float("dropout", 0.0, 0.3, step=0.05)
+            cfg.attn_dropout = trial.suggest_float("attn_dropout", 0.0, 0.2, step=0.05)
 
             cfg.coarse_loss_beta = trial.suggest_categorical("coarse_loss_beta", [0.0, 0.5, 1.0, 2.0])
         try:
@@ -370,9 +364,10 @@ def run_worker():
         constant_liar=True,
     )
 
-    pruner = optuna.pruners.MedianPruner(
-        n_startup_trials=5,
-        n_warmup_steps=3,
+    pruner = optuna.pruners.PercentilePruner(
+        percentile=25.0,
+        n_startup_trials=10,
+        n_warmup_steps=8,
     )
 
     study = optuna.create_study(
@@ -390,7 +385,7 @@ def run_worker():
         scene_path=scene_path,
         scene_meta_path=scene_meta_path,
         pred_scope = "destination", # "path" "destination"
-        full_feat_set= True,
+        full_feat_set=False,
     )
 
     cb = trial_jsonl_callback(jsonl_path)
