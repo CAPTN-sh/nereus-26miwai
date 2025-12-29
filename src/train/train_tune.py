@@ -129,7 +129,7 @@ def train_single_gpu(
         max_date=pd.Timestamp("2024-01-01"),
         world_size=1,
         rank=0,
-        batch_size=128,
+        batch_size=256,
         pin_memory=True,
         feat_cols=["speed", "course"],
         fut_len=cfg.pred_len,
@@ -156,8 +156,8 @@ def train_single_gpu(
     total_batches = 0
     num_batches = 0
     loss_sum = 0.0
-    SAMPLES_PER_EVAL = 256_000 # 20_783_360 total samples
-    batches_per_eval = SAMPLES_PER_EVAL // batch_size
+    max_batches = 40_000
+    batches_per_eval = 2_000
     
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -165,15 +165,18 @@ def train_single_gpu(
     warmup_lambda = lambda step: min(1.0, (step + 1) / warmup_batches)
     warmup_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_lambda)
 
+    """
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, 
-        factor=0.5, 
+        factor=0.1, 
         patience=4,
-        min_lr = 1e-7,
+        cooldown=2,
+        min_lr=1e-6,
     )
+    """
 
     scaler = amp.GradScaler()
-    stopper = EarlyStopper(patience=15, min_delta=1e-4)
+    stopper = EarlyStopper(patience=5, min_delta=1e-4)
     best_metric = float("inf")
 
     for epoch in range(num_epochs):
@@ -226,7 +229,7 @@ def train_single_gpu(
 
                 metric = float(metric)
                 best_metric = min(best_metric, metric)
-                scheduler.step(metric)
+                # scheduler.step(metric)
                 
                 # report to Optuna (so pruning can work)
                 trial.report(best_metric, step=eval_step)
@@ -239,8 +242,12 @@ def train_single_gpu(
                     if stopper.step(metric):
                         logging.info(f"[Eval Step {eval_step}] Early stopping: best={stopper.best:.6f}")
                         break
+                if (total_batches >= max_batches):
+                    if stopper.step(metric):
+                        logging.info(f"[Eval Step {eval_step}] Late stopping: best={stopper.best:.6f}")
+                        break
 
-        if stopper.stop:
+        if stopper.stop or (total_batches >= max_batches):
             break
     return best_metric
 
@@ -269,9 +276,8 @@ def make_objective(
 
     def objective(trial: optuna.Trial):
         # --- general params ---
-        batch_size = trial.suggest_categorical("batch_size", [32, 64, 128, 256])
-        base_lr = trial.suggest_float("base_lr", 1e-5, 1e-3, log=True)
-        lr = base_lr * (batch_size / 64) ** 0.5
+        batch_size = trial.suggest_categorical("batch_size", [256])
+        lr = trial.suggest_float("lr", 1e-5, 5e-3, log=True)
         weight_decay = trial.suggest_float("weight_decay",  1e-5, 1e-3, log=True)
 
         # --- traisformer params ---
@@ -365,8 +371,8 @@ def run_worker():
     )
 
     pruner = optuna.pruners.MedianPruner(
-        n_startup_trials=10,
-        n_warmup_steps=15,
+        n_startup_trials=5,
+        n_warmup_steps=3,
     )
 
     study = optuna.create_study(
@@ -405,5 +411,5 @@ CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisf
 CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_dest_full.db" OPTUNA_STUDY="traisformer_dest_full" OPTUNA_JSONL="traisformer_dest_full.jsonl" python -u src/train/train_tune.py
 
 CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_path_light.db" OPTUNA_STUDY="traisformer_path_light" OPTUNA_JSONL="traisformer_path_light.jsonl" python -u src/train/train_tune.py
-CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_path_full.db" OPTUNA_STUDY="traisformer_path_full" OPTUNA_JSONL="traisformer_path_full.jsonl" python -u src/train/train_tune.py
+CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_path_full.db" OPTUNA_STUDY="traisformer_path_full" OPTUNA_JSONL="traisformer_path_full.jsonl" python -u src/train/train_tune.py
 """
