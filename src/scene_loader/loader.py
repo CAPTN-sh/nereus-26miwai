@@ -4,11 +4,13 @@ import pandas as pd
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from sceen_loader.trajectories import SceenTrajectoryDataset, seq_collate
+from scene_loader.trajectories import SceneTrajectoryDataset, seq_collate
+from functools import partial
 
 
-def sceen_loader(
+def scene_loader(
     data_folder: Path,
+    flag: str,
     min_date: pd.Timestamp,
     max_date: pd.Timestamp,
     world_size: int,
@@ -16,18 +18,16 @@ def sceen_loader(
     batch_size: int,
     feat_cols=[],
     pin_memory=True,
-    normalizer_path = None
 ):
 
-    dset = SceenTrajectoryDataset(
-        nodes_path=data_folder / "fhkiel_kiel_ship_features.parquet",
-        edges_path=data_folder / "fhkiel_kiel_ship2ship_features.parquet",
+    file_name = f"{data_folder.parent.name}_{data_folder.name}_{flag}"
+    dset = SceneTrajectoryDataset(
+        nodes_path=data_folder / f"{file_name}_ship_features.parquet",
+        edges_path=data_folder / f"{file_name}_ship2ship_features.parquet",
+        flag=flag,
         min_date=min_date,
         max_date=max_date,
         feat_cols=feat_cols,
-        obs_len=24,
-        pred_len=24,
-        normalizer_path = normalizer_path
     )
 
     sampler = DistributedSampler(

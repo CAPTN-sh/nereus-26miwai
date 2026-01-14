@@ -4,7 +4,7 @@ from rasterio.features import rasterize
 from rasterio.warp import reproject, Resampling
 from scipy.ndimage import distance_transform_edt
 import numpy as np
-from models.traisformer.rasterize import Rasterizer
+from models.utils.maps.rasterize import Rasterizer
 import matplotlib.pyplot as plt
 
 MAX_DIST = 2000
@@ -32,9 +32,11 @@ def process_maps(rasterizer: Rasterizer, base_path):
             all_touched=True
         )
         # Euklidische Distanz (in Pixeln, dann mal Auflösung = Meter)
-        dist = distance_transform_edt(mask == 0) * rasterizer.pos_res
-        dist = 1.0 - dist.astype(np.float32).clip(0, MAX_DIST) / MAX_DIST
-        return dist
+        dist_m = distance_transform_edt(mask == 0) * rasterizer.pos_res
+        dist_m = np.minimum(dist_m, MAX_DIST)
+        dist_log = np.log1p(dist_m) / np.log1p(MAX_DIST)
+
+        return dist_log
 
     # Hilfsfunktion für TIFF (Raster -> Resampled Grid)
     def tiff_to_grid(file_name):
@@ -56,7 +58,7 @@ def process_maps(rasterizer: Rasterizer, base_path):
             return out_data[tuple(ind)]
 
     # Layer verarbeiten
-    print("Verarbeite Layer...")
+    print("Processing Scene Layers...")
     land_dist = geojson_to_dist("land.geojson")
     restricted_dist = geojson_to_dist("restricted_area.geojson")
     ferry_dist = geojson_to_dist("ferry_route.geojson")
@@ -84,7 +86,7 @@ def plot_maps(map_stack, rasterizer):
     plt.savefig("map_validation_with_polygons.png")
 
 # --- Ausführung ---
-path = "/data/projects/ship_tracker/assets/maps/2_standardized/fh/kiel/"
+path = "/home/bbi/nereus/assets/maps/2_standardized/fh/kiel/"
 my_rasterizer = Rasterizer([10.12, 54.31, 10.33, 54.46])
 
 final_maps = process_maps(my_rasterizer, path)

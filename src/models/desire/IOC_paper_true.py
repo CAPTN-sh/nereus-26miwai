@@ -20,7 +20,7 @@ class IOC(nn.Module):
         _scf_out = params.hidden_size + params.intermediate_size + params.out_channels
 
         self.scf = SCF(params)
-        self.gru = nn.GRU(input_size=_scf_out, hidden_size=_h, batch_first=True)
+        self.gru_cell = nn.GRUCell(_scf_out, _h)
         self.score_fc = nn.Linear(_h, 1)
         self.delta_fc = nn.Linear(_h, _out)
 
@@ -32,19 +32,27 @@ class IOC(nn.Module):
         # expand over the K samples
         obs_pos_last = obs_pos_last[:, None, :].expand(-1, K, -1).reshape(B * K, C).unsqueeze(-1)
         seq_start_end = (seq_start_end * K).to(device).long()
-        h0 = hidde_obs_enc[:, None, :].expand(-1, K, -1).reshape(B * K, -1)
+        h = hidde_obs_enc[:, None, :].expand(-1, K, -1).reshape(B * K, -1)
         
         # build absolute coords
         pred_pos_rel = pred_pos_rel.reshape(B * K, C, T)
         pred_pos_abs = obs_pos_last + pred_pos_rel.cumsum(dim=-1) * 100.0
         
-        h0_proj = h0.unsqueeze(1).expand(-1, T, -1)
-        scf_seq = self.scf.forward_vectorized(h0_proj, pred_pos_abs, pred_pos_rel, seq_start_end, scene_feats, rasterizer)
-        h_seq, _ = self.gru(scf_seq, h0.unsqueeze(0)) 
-        h_last = h_seq[:, -1]
-        
-        acc_scores = self.score_fc(h_seq).squeeze(-1).sum(dim=1)
-        acc_scores = acc_scores.view(B, K)
-        pred_delta = self.delta_fc(h_last).view(B, K, C, T)
+        acc_scores = torch.zeros(B*K, device=device)
 
+
+        #start = (T - 1) % 4
+        #for t in range(start, T, 4):
+
+        # paper faithfull
+        for t in range(0, T):
+            pa_t = pred_pos_abs[:, :, t]
+            pr_t = pred_pos_rel[:, :, t]
+
+            scf_t = self.scf(h, pa_t, pr_t, seq_start_end, scene_feats, rasterizer)
+            h = self.gru_cell(scf_t, h)
+            acc_scores = acc_scores + self.score_fc(h).squeeze(-1)
+
+        acc_scores = acc_scores.view(B, K)
+        pred_delta = self.delta_fc(h).view(B, K, C, T)
         return acc_scores, pred_delta

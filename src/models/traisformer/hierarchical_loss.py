@@ -2,7 +2,7 @@ from typing import Dict, Tuple
 import torch
 import torch.nn.functional as F
 from models.traisformer.params import TraisformerParams
-from models.traisformer.rasterize import Rasterizer
+from models.utils.maps.rasterize import Rasterizer
 
 RASTER = Rasterizer(TraisformerParams().bbox)
 

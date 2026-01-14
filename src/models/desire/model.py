@@ -1,10 +1,11 @@
 import torch.nn as nn
+import torch
 
 from models.desire.IOC import IOC
 from models.desire.nn.scene_pooling import ScenePoolingCNN
 from models.desire.SGM import SGM
 from models.desire.utils.params import DESIREParams
-
+from models.utils.maps.rasterize import Rasterizer
 
 class DESIRE(nn.Module):
     def __init__(self, params: DESIREParams):
@@ -16,18 +17,16 @@ class DESIRE(nn.Module):
         self.SGM = SGM(params)
         self.IOC = IOC(params)
 
-    def forward(self, batch, scene, scene_meta):
-        obs_feat, obs_pos, obs_pos_rel, fut_pos, fut_pos_rel, seq_start_end = batch
+        # TODO config
+        self.rasterizer = Rasterizer([10.12, 54.31, 10.33, 54.46])
+
+    def forward(self, batch, scene):
+        obs_feat, obs_pos, obs_pos_rel, obs_mask, fut_pos, fut_pos_rel, fut_mask, seq_start_end = batch
         obs_pos_last = obs_pos[:, :, -1]
 
         scene_feats = self.CNN(scene).squeeze(0)
 
-        # SGM: sample K hypotheses
-        #use_prior = (torch.rand((), device=obs_pos.device) < 0.5)
-        if False:
-            pred_pos_rel, hidde_obs_enc, mean, log_var = self.SGM.inference(obs_pos_rel)
-        else:
-            pred_pos_rel, hidde_obs_enc, mean, log_var = self.SGM(obs_pos_rel, fut_pos_rel)
+        pred_pos_rel, hidde_obs_enc, mean, log_var = self.SGM(obs_feat, obs_pos_rel, obs_mask, fut_pos_rel, fut_mask)
 
         # IOC: scores + per-step Δ for each hypothesis
         pred_pos_rel_best, pred_pos_rel_refined, scores = self.IOD_iteration(
@@ -36,20 +35,19 @@ class DESIRE(nn.Module):
             hidde_obs_enc,
             obs_pos_last,
             seq_start_end,
-            scene_feats,
-            scene_meta
+            scene_feats
         )
 
         return pred_pos_rel_best, pred_pos_rel, pred_pos_rel_refined, mean, log_var, scores
 
-    def inference(self, batch, scene, scene_meta):
-        obs_feat, obs_pos, obs_pos_rel, fut_pos, fut_pos_rel, seq_start_end = batch
+    def inference(self, batch, scene):
+        obs_feat, obs_pos, obs_pos_rel, obs_mask, fut_pos, fut_pos_rel, fut_mask, seq_start_end = batch
         obs_pos_last = obs_pos[:, :, -1]
 
         scene_feats = self.CNN(scene).squeeze(0)
 
         # SGM: sample K hypotheses
-        pred_pos_rel, hidde_obs_enc, mean, log_var = self.SGM.inference(obs_pos_rel)
+        pred_pos_rel, hidde_obs_enc, mean, log_var = self.SGM.inference(obs_feat, obs_pos_rel, obs_mask)
         
         # IOC: scores + per-step Δ for each hypothesis
         pred_pos_rel_best, pred_pos_rel_refined, scores = self.IOD_iteration(
@@ -58,15 +56,14 @@ class DESIRE(nn.Module):
             hidde_obs_enc, 
             obs_pos_last, 
             seq_start_end, 
-            scene_feats, 
-            scene_meta
+            scene_feats,
         )
 
         return pred_pos_rel_best, pred_pos_rel_refined
     
-    def IOD_iteration(self, num_refine_iters, pred_pos_rel, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats, scene_meta):
+    def IOD_iteration(self, num_refine_iters, pred_pos_rel, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats):
         scores, delta = self.IOC(
-            pred_pos_rel, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats, scene_meta
+            pred_pos_rel, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats, self.rasterizer
         )
         pred_pos_rel_refined = pred_pos_rel + delta
 
@@ -77,7 +74,7 @@ class DESIRE(nn.Module):
                 obs_pos_last,
                 seq_start_end,
                 scene_feats,
-                scene_meta,
+                self.rasterizer,
             )
             pred_pos_rel_refined = pred_pos_rel_refined + delta
 
@@ -87,7 +84,7 @@ class DESIRE(nn.Module):
             obs_pos_last,
             seq_start_end,
             scene_feats,
-            scene_meta,
+            self.rasterizer,
         )
 
         best_idx = scores.argmax(dim=1)

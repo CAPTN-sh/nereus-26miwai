@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from .params import LSTMParams
-from models.traisformer.rasterize import Rasterizer
+from models.utils.maps.rasterize import Rasterizer
 
 class LSTMModel(nn.Module):
     def __init__(self, config: LSTMParams):

@@ -13,16 +13,40 @@ class SCF(nn.Module):
         self.velocity_fc = nn.Linear(params.pred_dim, params.intermediate_size)
         self.social_pool = SocialPool(params)
 
-    def forward(
-        self, hidden, pred_pos_abs, pred_pos_rel, seq_start_end, scene_feats, scene_meta
+    def forward_vectorized(
+        self, hidden, pred_pos_abs, pred_pos_rel, seq_start_end, scene_feats, rasterizer
     ):
+        pred_pos_abs = pred_pos_abs.permute(0, 2, 1)
+        pred_pos_rel = pred_pos_rel.permute(0, 2, 1)
+
+        BK, T, _ = pred_pos_abs.shape
+
+        vel_out = F.relu(self.velocity_fc(pred_pos_rel))
+        scene_out = sample_scene_features(
+            scene_feats=scene_feats,
+            pred_pos_abs=pred_pos_abs.reshape(BK*T, 2),
+            rasterizer=rasterizer,
+            feature_stride=2, # TODO
+        ).view(BK, T, -1)
+
+        sp_out = self.social_pool.forward_vectorized(
+            pred_pos_abs, hidden, seq_start_end
+        )
+        return torch.cat((sp_out, vel_out, scene_out), dim=-1)
+    
+
+    def forward(
+        self, hidden, pred_pos_abs, pred_pos_rel, seq_start_end, scene_feats, rasterizer
+    ):
+
+        vel_out = F.relu(self.velocity_fc(pred_pos_rel))
+
         scene_out = sample_scene_features(
             scene_feats=scene_feats,
             pred_pos_abs=pred_pos_abs,
-            pos_to_px=scene_meta["world_to_bev"],
+            rasterizer=rasterizer,
             feature_stride=2, # TODO
         )
 
-        vel_out = F.relu(self.velocity_fc(pred_pos_rel))
         sp_out = self.social_pool(pred_pos_abs, hidden, seq_start_end)
         return torch.cat((sp_out, vel_out, scene_out), 1)

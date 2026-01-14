@@ -1,28 +1,18 @@
 from pathlib import Path
 import pandas as pd
-from sceen_loader.loader import sceen_loader
+from scene_loader.loader import SceneTrajectoryDataset
 
-data_folder = Path("/home/bbiesenbach/ais.processing/data/ais/4_features")
-train_dset, train_sampler, train_loader = sceen_loader(
-    data_folder=data_folder / "fhkiel_train/kiel",
-    min_date=pd.Timestamp("2022-01-01"),
-    max_date=pd.Timestamp("2024-01-01"), # hyper: 2022-05-16, full: 2024-01-01
-    world_size=1,
-    rank=0,
-    batch_size=1024 * 8,
-    pin_memory=False,
-    feat_cols=["speed", "course"],
-    normalizer_path = None
-)
+feat_cols = ["speed", "course", "acc", "angular_difference", "length", "width", "ship_group"]
+data_folder = Path("/home/bbi/nereus/assets/ais/4_features/fh/kiel")
 
-train_dset, train_sampler, train_loader = sceen_loader(
-    data_folder=data_folder / "fhkiel_train/kiel",
-    min_date=pd.Timestamp("2022-01-01"),
-    max_date=pd.Timestamp("2024-01-01"), # hyper: 2023-03-25, full: 2024-01-01 
-    world_size=1,
-    rank=0,
-    batch_size=1024 * 8,
-    pin_memory=False,
-    feat_cols=["speed", "course"],
-    normalizer_path = "/home/bbiesenbach/shipwise/data/cache/sceen_loader_2022-01-01_2024-01-01_24_24__sc_fhkiel_trainkiel_normalizer.pkl"
-)
+for l in ["val"]: # "train", 
+    file_name = f"{data_folder.parent.name}_{data_folder.name}_{l}"
+    dset = SceneTrajectoryDataset(
+        nodes_path=data_folder / f"{file_name}_ship_features.parquet",
+        edges_path=data_folder / f"{file_name}_ship2ship_features.parquet",
+        flag=l,
+        min_date=pd.Timestamp("2022-01-01"),
+        max_date=pd.Timestamp("2024-01-01"),
+        feat_cols=feat_cols,
+        force_rebuild=True,
+    )

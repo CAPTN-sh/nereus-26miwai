@@ -20,21 +20,21 @@ class SGM(nn.Module):
         self.latent_size = params.latent_size
         self.num_samples = params.num_samples
 
-        self.enc_obs = RNNEncoder(params, kernel_size=3)
-        self.enc_fut = RNNEncoder(params, kernel_size=1)
+        self.enc_obs = RNNEncoder(params, kernel_size=3, input_dim = params.pred_dim + params.obs_feat_dim)
+        self.enc_fut = RNNEncoder(params, kernel_size=1, input_dim = params.pred_dim)
 
         self.cvae = CVAEEncoder(params)
         self.beta_fc = nn.Linear(self.latent_size, self.hidden_size, bias=True)
 
         self.dec = RNNDecoder(params)
 
-    def forward(self, obs_pos_rel: torch.Tensor, fut_pos_rel: torch.Tensor):
+    def forward(self, obs_feat: torch.Tensor, obs_pos_rel: torch.Tensor, obs_mask: torch.Tensor, fut_pos_rel: torch.Tensor, fut_mask: torch.Tensor):
         device = obs_pos_rel.device
         B = fut_pos_rel.shape[0]
 
-        # encode obs and fut
-        hidde_obs_enc = self.enc_obs(obs_pos_rel)[1][-1]
-        hidde_fut_enc = self.enc_fut(fut_pos_rel)[1][-1]
+        obs = torch.cat([obs_feat, obs_pos_rel], dim=1)
+        hidde_obs_enc = self.enc_obs(obs, obs_mask)[-1]
+        hidde_fut_enc = self.enc_fut(fut_pos_rel, fut_mask)[-1]
 
         # sample k times
         mean, log_var = self.cvae(hidde_fut_enc, hidde_obs_enc)
@@ -45,14 +45,15 @@ class SGM(nn.Module):
         pred_pos_rel = self.generate_traj(hidde_obs_enc, z_k, B, device)
         return pred_pos_rel, hidde_obs_enc, mean, log_var
 
-    def inference(self, obs_pos_rel: torch.Tensor):
+    def inference(self, obs_feat: torch.Tensor, obs_pos_rel: torch.Tensor, obs_mask: torch.Tensor):
         device = obs_pos_rel.device
         B = obs_pos_rel.size(0)
         K = self.num_samples
         L = self.latent_size
 
         # Encode observed
-        hidde_obs_enc = self.enc_obs(obs_pos_rel)[1][-1]
+        obs = torch.cat([obs_feat, obs_pos_rel], dim=1)
+        hidde_obs_enc = self.enc_obs(obs, obs_mask)[-1]
 
         # Sample z_k ~ N(0,I) for prior
         z_k = torch.randn(B, K, L, device=device)

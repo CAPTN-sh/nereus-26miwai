@@ -73,7 +73,7 @@ class TrajectoryHeatmapDataset(Dataset):
             raise ValueError("There are no values within the given time range.")
 
         # TODO config
-        ship_db_path = Path("/data/projects/ship_tracker/assets/ship_db/ship_db.parquet")
+        ship_db_path = Path("/home/bbi/nereus/assets/ship_db/ship_db.parquet")
         ship_db = pd.read_parquet(ship_db_path)
         nodes = nodes.reset_index().merge(ship_db, on="mmsi")
         nodes = cords_to_meters(nodes)

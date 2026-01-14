@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from models.traisformer.params import TraisformerParams
-from models.traisformer.rasterize import Rasterizer
+from models.utils.maps.rasterize import Rasterizer
 from torchvision.transforms.functional import gaussian_blur
 
 RASTER = Rasterizer(TraisformerParams().bbox)

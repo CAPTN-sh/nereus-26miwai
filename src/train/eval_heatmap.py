@@ -23,7 +23,6 @@ def eval_heatmap(
     eval_loader: DataLoader,
     device: torch.device,
     scene,
-    scene_meta,
     trial_number = 0,
     config=None,
 ):
@@ -58,7 +57,7 @@ def eval_heatmap(
 
             batch = [t.to(device) for t in batch]
 
-            output = model(batch, scene, scene_meta)
+            output = model(batch, scene)
             
             if config.pred_scope == "path":
                 loss, loss_dict = loss_occupancy_heatmap(output, batch, config=config)

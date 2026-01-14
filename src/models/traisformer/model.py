@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
 
-from .params import TraisformerParams
-from .rasterize import Rasterizer
-from .transformer_block import Block
-from .map_encoder import ScenePoolingCNN
+from models.traisformer.params import TraisformerParams
+from models.utils.maps.rasterize import Rasterizer
+from models.traisformer.transformer_block import Block
+from models.traisformer.map_encoder import ScenePoolingCNN
 
 
 class TrAISformer(nn.Module):
@@ -13,9 +13,9 @@ class TrAISformer(nn.Module):
     def __init__(self, config: TraisformerParams):
         super().__init__()
         self.config = config
-        self.raster = Rasterizer(config.bbox)
+        self.rasterizer = Rasterizer(config.bbox)
         self.x_size, self.y_size, sog_size, cog_size, acc_size, rot_size = (
-            self.raster.get_total_grid_sizes()
+            self.rasterizer.get_total_grid_sizes()
         )
 
         # state_embd
@@ -62,18 +62,18 @@ class TrAISformer(nn.Module):
         obs_feat, obs_pos, _, obs_mask, *_ = batch
         B, seqlen, _ = obs_pos.size()
 
-        x_idx, y_idx = self.raster.pos_to_index(obs_pos)
+        x_idx, y_idx = self.rasterizer.pos_to_index(obs_pos)
         embeddings_list = [
             self.lat_emb(x_idx),
             self.lon_emb(y_idx)
         ]
 
         if self.config.n_kinematic_embd > 0:
-            sog_idx, cog_idx = self.raster.kin_to_index(obs_feat[..., :2])
+            sog_idx, cog_idx = self.rasterizer.kin_to_index(obs_feat[..., :2])
             embeddings_list.extend([self.sog_emb(sog_idx), self.cog_emb(cog_idx)])
 
         if self.config.n_dynamic_embd > 0:
-            acc_idx, rot_idx = self.raster.dyn_to_index(obs_feat[..., 2:4])
+            acc_idx, rot_idx = self.rasterizer.dyn_to_index(obs_feat[..., 2:4])
             embeddings_list.extend([self.acc_emb(acc_idx), self.rot_emb(rot_idx)])
 
         if self.config.n_terrain_embd > 0:

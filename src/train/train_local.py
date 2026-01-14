@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 
-from sceen_loader.loader import sceen_loader
+from scene_loader.loader import scene_loader
 from train.eval import eval
 
 
@@ -64,7 +64,7 @@ def train_cpu(
     print(f"Starting training on {device}")
 
     # --- DataLoaders (single-process, no DDP) ---
-    train_dset, train_sampler, train_loader = sceen_loader(
+    train_dset, train_sampler, train_loader = scene_loader(
         data_folder=data_folder / "fhkiel_train/kiel",
         min_date=pd.Timestamp("2022-01-01"),
         max_date=pd.Timestamp("2022-05-16"), # hyper: 2022-05-16, full: 2024-01-01
@@ -75,7 +75,7 @@ def train_cpu(
         feat_cols=["speed", "course"],
     )
 
-    eval_dset, eval_sampler, eval_loader = sceen_loader(
+    eval_dset, eval_sampler, eval_loader = scene_loader(
         data_folder=data_folder / "fhkiel_val/kiel",
         min_date=pd.Timestamp("2022-01-01"),
         max_date=pd.Timestamp("2023-03-25"), # hyper: 2023-03-25, full: 2024-01-01 

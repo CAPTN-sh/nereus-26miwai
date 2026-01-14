@@ -3,6 +3,7 @@ import logging
 import os
 from pathlib import Path
 from datetime import datetime
+import torch.multiprocessing as mp
 
 import numpy as np
 import pandas as pd
@@ -22,12 +23,11 @@ from models.traisformer.hierarchical_loss import loss_intent_heatmap, loss_occup
 from models.traisformer.model import TrAISformer
 from models.traisformer.params import TraisformerParams
 from train.eval_heatmap import eval_heatmap
-from loader_heatmap.loader import loader_heatmap
+from scene_loader.loader import scene_loader
 from train.eval import eval, eval_loss
 from utils.logger import logger
 from train.early_stopper import EarlyStopper
 from models.utils.maps.scene_gernerator import process_maps
-from models.utils.maps.rasterize import Rasterizer
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -83,8 +83,6 @@ def train_single_gpu(
     loss_fn,
     eval_fn,
     data_folder: Path,
-    scene_path: Path,
-    scene_meta_path: Path,
     batch_size: int,
     num_epochs: int,
     lr:float,
@@ -93,8 +91,6 @@ def train_single_gpu(
 ):
     # One trial = one GPU (the worker process sets CUDA_VISIBLE_DEVICES)
     assert torch.cuda.is_available()
-    device = torch.device("cuda:0")
-    torch.cuda.set_device(device)
 
     print(
         "CUDA_VISIBLE_DEVICES=", os.environ.get("CUDA_VISIBLE_DEVICES"),
@@ -108,7 +104,8 @@ def train_single_gpu(
     trial_settings = {k: round(v, 6) if isinstance(v, float) else v for k, v in trial.params.items()}
     logging.info(f"[Trial {trial.number}] {trial_settings}")
 
-    train_dset, _, train_loader = loader_heatmap(
+    feat_cols = ["speed", "course", "acc", "angular_difference", "length", "width", "ship_group"]
+    train_dset, _, train_loader = scene_loader(
         data_folder=data_folder,
         flag="train",
         min_date=pd.Timestamp("2022-01-01"),
@@ -117,47 +114,40 @@ def train_single_gpu(
         rank=0,
         batch_size=batch_size,
         pin_memory=True,
-        feat_cols=["speed", "course"],
-        fut_len=cfg.pred_len,
-        obs_len=cfg.obs_len,
+        feat_cols=feat_cols,
     )
 
-    eval_dset, _, eval_loader = loader_heatmap(
+    eval_dset, _, eval_loader = scene_loader(
         data_folder=data_folder,
         flag="val",
         min_date=pd.Timestamp("2022-01-01"),
         max_date=pd.Timestamp("2024-01-01"),
         world_size=1,
         rank=0,
-        batch_size=256,
+        batch_size=batch_size,
         pin_memory=True,
-        feat_cols=["speed", "course"],
-        fut_len=cfg.pred_len,
-        obs_len=cfg.obs_len,
+        feat_cols=feat_cols,
     )
+
+    device = torch.device("cuda:0")
+    torch.cuda.set_device(device)
 
     model = model_cls(cfg).to(device)
 
-    if model == "DESIRE":
-        npz = np.load(scene_path)
-        scene = torch.from_numpy(npz["I"]).unsqueeze(0).to(device)
-        scene_meta = json.load(open(scene_meta_path))
-        scene_meta["world_to_bev"] = torch.as_tensor(
-            scene_meta["world_to_bev"], device=device, dtype=torch.float32
-        )
-    #TODO select scene depending on model
-    path = "/home/bbi/nereus/assets/maps/2_standardized/fh/kiel/"
-    my_rasterizer = Rasterizer([10.12, 54.31, 10.33, 54.46])
-
-    scene_contiguous = np.ascontiguousarray(process_maps(my_rasterizer, path))
-    scene = torch.from_numpy(scene_contiguous).unsqueeze(0).to(device)
-    scene_meta = None
+    if hasattr(model, "rasterizer"):
+        print("loading scene layers")
+        path = "/home/bbi/nereus/assets/maps/2_standardized/fh/kiel/" #TODO select scene depending on model
+        scene_contiguous = np.ascontiguousarray(process_maps(model.rasterizer, path), dtype=np.float32)
+        scene = torch.from_numpy(scene_contiguous).unsqueeze(0).to(device)
+    else:
+        scene = None
 
     total_batches = 0
     num_batches = 0
+    eval_step = 0
     loss_sum = 0.0
-    max_batches = 40_000
-    batches_per_eval = 2_000
+    max_batches = 40_000        # 40_000 bei batchsize 64
+    batches_per_eval = 2_000    # 2_000
     
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -187,16 +177,12 @@ def train_single_gpu(
             optimizer.zero_grad(set_to_none=True)
 
             batch = [t.to(device, non_blocking=True) for t in batch]
+            output = model(batch, scene)
+            loss, _loss_dict = loss_fn(output, batch, eval_step, config=cfg)
 
-            with amp.autocast(device_type="cuda", dtype=torch.bfloat16):
-                output = model(batch, scene, scene_meta)
-                loss, _loss_dict = loss_fn(output, batch, config=cfg)
-
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
+            loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.step()
 
             num_batches += 1
             total_batches += 1
@@ -220,8 +206,7 @@ def train_single_gpu(
                         model, 
                         eval_loader, 
                         device, 
-                        scene, 
-                        scene_meta, 
+                        scene,
                         trial_number=trial.number,
                         config=cfg,
                     )
@@ -253,8 +238,6 @@ def train_single_gpu(
 def make_objective(
     model_choice: str,
     data_folder: Path,
-    scene_path: Path,
-    scene_meta_path: Path,
     pred_scope: str,
     full_feat_set: bool,
 ):
@@ -264,52 +247,23 @@ def make_objective(
     elif model_choice == "LSTM":
         model_cls, cfg, loss_fn, eval_fn = LSTMModel, LSTMParams(), mse, eval_lstm
     elif model_choice == "TRAISFORMER":
-        model_cls, cfg, loss_fn, eval_fn = (
-            TrAISformer,
-            TraisformerParams(),
-            loss_occupancy_heatmap if pred_scope == "path" else loss_intent_heatmap,
-            eval_heatmap,
-        )
+        model_cls, cfg, (TrAISformer, TraisformerParams())
+        loss_fn, eval_fn = (loss_occupancy_heatmap if pred_scope == "path" else loss_intent_heatmap, eval_heatmap)
     else:
         raise ValueError(f"Unknown model_choice: {model_choice}")
 
     def objective(trial: optuna.Trial):
         # --- general params ---
-        batch_size = trial.suggest_categorical("batch_size", [256])
-        lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
+        batch_size = trial.suggest_categorical("batch_size", [64])
+        lr = trial.suggest_float("lr", 1e-5, 5e-3, log=True)
         weight_decay = trial.suggest_float("weight_decay",  1e-6, 1e-3, log=True)
 
         # --- traisformer params ---
-        if (model_choice == "TRAISFORMER"):
-            cfg.pred_scope = pred_scope
-            cfg.full_feat_set = full_feat_set
-
-            if pred_scope == "path":
-                cfg.pred_len = 45 * 12
-
-            cfg.n_layer = trial.suggest_int("n_layer", 2, 8, step=2)
-            cfg.n_head = trial.suggest_categorical("n_head", [4, 8])
-            head_dim = trial.suggest_int("head_dim", 32, 128, step=32)
-            cfg.n_embd = cfg.n_head * head_dim
-
-            cat_meta = [("spatial", [4], 2), ("kinematic", [0,1,2,4], 2)]
-            if cfg.full_feat_set:
-                cat_meta += [("dynamic", [0,1,2,4], 2), ("terrain", [0,1,2,4], 1), ("vessel", [0,1,2,4], 1)]
-
-            names, _, costs = zip(*cat_meta)
-            splits = [trial.suggest_categorical(f"n_{n}", r) for n, r, c in cat_meta]
-            budget = (cfg.n_embd) // 16
-
-            embd = np.array([int(s * budget / sum(splits)) for s in splits])
-            embd[np.argsort(-(np.array(splits) * budget / sum(splits) % 1))[:budget - embd.sum()]] += 1
-
-            for name, cost, value in zip(names, costs, embd):
-                setattr(cfg, f"n_{name}_embd", int(value * 16 // cost))
-
-            cfg.dropout = trial.suggest_float("dropout", 0.0, 0.3, step=0.05)
-            cfg.attn_dropout = trial.suggest_float("attn_dropout", 0.0, 0.2, step=0.05)
-
-            cfg.coarse_loss_beta = trial.suggest_categorical("coarse_loss_beta", [0.0, 0.5, 1.0, 2.0])
+        if (model_choice == "DESIRE"):
+            cfg.hidden_size = trial.suggest_categorical("hidden_size", [32, 48, 64, 80])
+            cfg.out_channels = trial.suggest_categorical("out_channels", [16, 32])
+            cfg.latent_size = trial.suggest_categorical("latent_size", [16, 32, 48])
+            cfg.num_samples = trial.suggest_categorical("num_samples", [1, 2, 3])
         try:
             metric = train_single_gpu(
                 model_cls=model_cls,
@@ -317,8 +271,6 @@ def make_objective(
                 loss_fn=loss_fn,
                 eval_fn=eval_fn,
                 data_folder=data_folder,
-                scene_path=scene_path,
-                scene_meta_path=scene_meta_path,
                 batch_size=batch_size,
                 num_epochs=1,
                 lr=lr,
@@ -353,8 +305,6 @@ def run_worker():
 
     # your paths
     data_folder = Path("/home/bbi/nereus/assets/ais/4_features/fh/kiel")
-    scene_path = Path("data/kiel/scenes/bev.npz")
-    scene_meta_path = Path("data/kiel/scenes/bev_meta.json")
 
     logger(file_prefix=f"optuna_worker_{model_choice}")
     logging.info(study_name)
@@ -366,7 +316,7 @@ def run_worker():
 
     pruner = optuna.pruners.PercentilePruner(
         percentile=25.0,
-        n_startup_trials=10,
+        n_startup_trials=15,
         n_warmup_steps=8,
     )
 
@@ -382,8 +332,6 @@ def run_worker():
     objective = make_objective(
         model_choice=model_choice,
         data_folder=data_folder,
-        scene_path=scene_path,
-        scene_meta_path=scene_meta_path,
         pred_scope = "path", # "path" "destination"
         full_feat_set=True,
     )
@@ -397,14 +345,11 @@ def run_worker():
         logging.info(f"BEST params={study.best_params}")
 
 if __name__ == "__main__":
+    #mp.set_start_method("spawn", force=True)
     run_worker()
 
 """
-CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///obs_len_lstm.db" OPTUNA_STUDY="obs_len_lstm" OPTUNA_JSONL="obs_len_lstm.jsonl" python -u src/train/train_tune.py
 
-CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_dest_light.db" OPTUNA_STUDY="traisformer_dest_light" OPTUNA_JSONL="traisformer_dest_light.jsonl" python -u src/train/train_tune.py
-CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_dest_full.db" OPTUNA_STUDY="traisformer_dest_full" OPTUNA_JSONL="traisformer_dest_full.jsonl" python -u src/train/train_tune.py
+CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_rel.db" OPTUNA_STUDY="desire_rel" OPTUNA_JSONL="desire_rel.jsonl" python -u src/train/train_tune_desire.py
 
-CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_path_light.db" OPTUNA_STUDY="traisformer_path_light" OPTUNA_JSONL="traisformer_path_light.jsonl" python -u src/train/train_tune.py
-CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///traisformer_path_full.db" OPTUNA_STUDY="traisformer_path_full" OPTUNA_JSONL="traisformer_path_full.jsonl" python -u src/train/train_tune.py
 """
