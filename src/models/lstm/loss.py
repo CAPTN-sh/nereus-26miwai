@@ -28,15 +28,30 @@ def mse(pred_rel, batch, config = None):
 
     return mse, {"mse": mse}
 
-def mse_sum_count(pred_abs, fut_pos, fut_mask):
-    sq = (pred_abs - fut_pos).pow(2).sum(dim=-1)      # [B, T]
-    m = fut_mask.bool()
-    return sq[m].sum(), m.sum()
+def fde_per_agent(pred_abs, fut_pos, fut_mask):
+    B, T, _ = pred_abs.shape
 
-def ade_sum_count(pred_abs, fut_pos, fut_mask):
+    dist = torch.norm(pred_abs - fut_pos, dim=-1)  # [B, T]
+    mask = fut_mask.bool()
+
+    fde = torch.zeros(B, device=pred_abs.device)
+
+    for a in range(B):
+        valid_idx = mask[a].nonzero(as_tuple=False)
+        if len(valid_idx) > 0:
+            last_t = valid_idx[-1, 0]
+            fde[a] = dist[a, last_t]
+
+    return fde.mean()
+
+def ade_per_agent(pred_abs, fut_pos, fut_mask):
     dist = torch.norm(pred_abs - fut_pos, dim=-1)     # [B, T]
-    m = fut_mask.bool()
-    return dist[m].sum(), m.sum()
+    mask = fut_mask.float()
+
+    dist_sum = (dist * mask).sum(dim=1)
+    ade_agent = dist_sum / mask.sum(dim=1)
+
+    return ade_agent.mean()
 
 def eval_lstm(
     epoch: int,
@@ -44,7 +59,6 @@ def eval_lstm(
     eval_loader: DataLoader,
     device: torch.device,
     scene,
-    scene_meta,
     trial_number = 0,
     config=None,
 ):
@@ -56,8 +70,8 @@ def eval_lstm(
     model.eval()
 
     num_batches = 0
-    dist_sum = 0.0
-    sq_sum = 0.0
+    ade_sum = 0.0
+    fde_sum = 0.0
     count = 0
 
     plotted = True
@@ -71,26 +85,19 @@ def eval_lstm(
             num_batches += 1
 
             batch = [t.to(device, non_blocking=True) for t in batch]
-            pred_rel = model(batch, scene, scene_meta)
+            pred_rel = model(batch, scene)
 
             _, obs_pos, _, obs_mask, fut_pos, _, fut_mask, _ = batch
             pred_abs = torch.cumsum(pred_rel, dim=1) + obs_pos[:, -1:, :] 
 
-            d_sum, d_cnt = ade_sum_count(pred_abs, fut_pos, fut_mask)
-            s_sum, s_cnt = mse_sum_count(pred_abs, fut_pos, fut_mask)
-
-            # d_cnt and s_cnt are the same mask count; still keep it robust:
-            dist_sum += float(d_sum.item())
-            sq_sum += float(s_sum.item())
-            count += int(d_cnt.item())
-
-            if(int(d_cnt.item()) == 0):
-                print("lksfdjlkdjfdljfkdllfjlfjdlkfjldf")
+            ade_sum += float(ade_per_agent(pred_abs, fut_pos, fut_mask).item())
+            fde_sum += float(fde_per_agent(pred_abs, fut_pos, fut_mask).item())
+            count += 1
 
             if not plotted:
                 plotted = True 
                 plot_traj(
-                    f"lstm_tn{trial_number}",
+                    f"lstm_trial_{trial_number}",
                     obs_pos, fut_pos, pred_abs,
                     n_plots,
                     obs_mask=obs_mask,
@@ -98,10 +105,10 @@ def eval_lstm(
                     epoch = epoch,
                 )
 
-    ade_avg = dist_sum / max(1, count)
-    mse_avg = sq_sum / max(1, count)
+    ade_avg = ade_sum / max(1, count)
+    fde_avg = fde_sum / max(1, count)
 
-    logging.info(f"[Eval] epoch={epoch} ade={ade_avg:.6f} mse={mse_avg:.6f}")
+    logging.info(f"[Eval] epoch={epoch} ade={ade_avg:.6f} fde={fde_avg:.6f}")
     return ade_avg
 
 @lru_cache(maxsize=1)

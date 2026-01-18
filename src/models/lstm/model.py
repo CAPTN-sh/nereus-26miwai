@@ -2,19 +2,12 @@ import torch
 import torch.nn as nn
 
 from .params import LSTMParams
-from models.utils.maps.rasterize import Rasterizer
 
 class LSTMModel(nn.Module):
     def __init__(self, config: LSTMParams):
         super().__init__()
         self.pred_len = config.pred_len
-        raster = Rasterizer([10.12, 54.31, 10.33, 54.46])
-        self.x_min = raster.x_min
-        self.y_min = raster.y_min
-        self.x_range = raster.x_max - raster.x_min
-        self.y_range = raster.y_max - raster.y_min
-
-        self.encoder = nn.LSTM(4, config.enc_hidden_size, batch_first=True)
+        self.encoder = nn.LSTM(2 + 11, config.enc_hidden_size, batch_first=True)
 
         self.h_proj = nn.Linear(config.enc_hidden_size, config.dec_hidden_size)
         self.c_proj = nn.Linear(config.enc_hidden_size, config.dec_hidden_size)
@@ -23,12 +16,18 @@ class LSTMModel(nn.Module):
         self.out = nn.Linear(config.dec_hidden_size, 2)
         
 
-    def forward(self, batch, scene, scene_meta):
-        obs_feat, _, obs_rel, *_ = batch
+    def forward(self, batch, scene=None):
+        obs_feat, _, obs_rel, obs_mask, *_ = batch
         max_dist = 100 # 40kn for 5s
-        x = torch.cat([obs_feat, obs_rel/max_dist], dim=-1)
 
-        _, (h, c) = self.encoder(x)
+        x = torch.cat([obs_rel/max_dist, obs_feat], dim=-1)
+
+        lengths = obs_mask.sum(dim=1).cpu()
+        packed_x = nn.utils.rnn.pack_padded_sequence(
+            x, lengths, batch_first=True, enforce_sorted=False
+        )
+
+        _, (h, c) = self.encoder(packed_x)
 
         h = self.h_proj(h)
         c = self.c_proj(c)
@@ -44,5 +43,5 @@ class LSTMModel(nn.Module):
         pred_rel = torch.cat(pred_rel, dim=1) * max_dist
         return pred_rel
 
-    def inference(self, batch, scene, scene_meta):
-        return self.forward(batch, scene, scene_meta), None
+    def inference(self, batch, scene=None):
+        return self.forward(batch, scene), None

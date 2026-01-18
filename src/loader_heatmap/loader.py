@@ -15,7 +15,6 @@ def loader_heatmap(
     batch_size: int,
     feat_cols=[],
     pin_memory=True,
-    normalizer_path = None,
     fut_len = 540,
     obs_len = 120,
 ):

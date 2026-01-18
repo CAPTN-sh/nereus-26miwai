@@ -3,7 +3,6 @@ import logging
 import os
 from pathlib import Path
 from datetime import datetime
-import torch.multiprocessing as mp
 
 import numpy as np
 import pandas as pd
@@ -28,6 +27,8 @@ from train.eval import eval, eval_loss
 from utils.logger import logger
 from train.early_stopper import EarlyStopper
 from models.utils.maps.scene_gernerator import process_maps
+
+from utils.config import DATA_FOLDER_PATH
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -136,7 +137,7 @@ def train_single_gpu(
 
     if hasattr(model, "rasterizer"):
         print("loading scene layers")
-        path = "/home/bbi/nereus/assets/maps/2_standardized/fh/kiel/" #TODO select scene depending on model
+        path = DATA_FOLDER_PATH / "maps/2_standardized/fh/kiel/" #TODO select scene depending on model
         scene_contiguous = np.ascontiguousarray(process_maps(model.rasterizer, path), dtype=np.float32)
         scene = torch.from_numpy(scene_contiguous).unsqueeze(0).to(device)
     else:
@@ -304,7 +305,7 @@ def run_worker():
     jsonl_path = Path(os.environ.get("OPTUNA_JSONL", f"optuna_{study_name}.jsonl"))
 
     # your paths
-    data_folder = Path("/home/bbi/nereus/assets/ais/4_features/fh/kiel")
+    data_folder = DATA_FOLDER_PATH / "ais/4_features/fh/kiel"
 
     logger(file_prefix=f"optuna_worker_{model_choice}")
     logging.info(study_name)
@@ -315,8 +316,8 @@ def run_worker():
     )
 
     pruner = optuna.pruners.PercentilePruner(
-        percentile=25.0,
-        n_startup_trials=15,
+        percentile=10.0,
+        n_startup_trials=10,
         n_warmup_steps=8,
     )
 
@@ -338,7 +339,7 @@ def run_worker():
 
     cb = trial_jsonl_callback(jsonl_path)
 
-    study.optimize(objective, n_trials=50, gc_after_trial=True, callbacks=[cb])
+    study.optimize(objective, n_trials=17, gc_after_trial=True, callbacks=[cb])
 
     if study.best_trial is not None:
         logging.info(f"BEST value={study.best_value}")
@@ -350,6 +351,6 @@ if __name__ == "__main__":
 
 """
 
-CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_rel.db" OPTUNA_STUDY="desire_rel" OPTUNA_JSONL="desire_rel.jsonl" python -u src/train/train_tune_desire.py
+CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_rel.db" OPTUNA_STUDY="desire_rel" OPTUNA_JSONL="desire_rel.jsonl" python -u src/train/train_tune_desire.py
 
 """

@@ -5,6 +5,8 @@ from pathlib import Path
 
 import yaml
 
+DATA_FOLDER_PATH = Path("/data/projects/ship_tracker/assets")
+SHIP_DB_PATH = DATA_FOLDER_PATH / "ship_db/ship_db.parquet"
 
 class Config:
     _instance = None

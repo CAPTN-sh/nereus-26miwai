@@ -2,10 +2,11 @@ from pathlib import Path
 import pandas as pd
 from scene_loader.loader import SceneTrajectoryDataset
 
-feat_cols = ["speed", "course", "acc", "angular_difference", "length", "width", "ship_group"]
-data_folder = Path("/home/bbi/nereus/assets/ais/4_features/fh/kiel")
+from utils.config import DATA_FOLDER_PATH
 
-for l in ["val"]: # "train", 
+feat_cols = ["speed", "course", "acc", "angular_difference", "length", "width", "ship_group"]
+data_folder = DATA_FOLDER_PATH / "ais/4_features/fh/kiel"
+for l in ["val", "train"]: # "train", 
     file_name = f"{data_folder.parent.name}_{data_folder.name}_{l}"
     dset = SceneTrajectoryDataset(
         nodes_path=data_folder / f"{file_name}_ship_features.parquet",

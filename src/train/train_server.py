@@ -26,6 +26,8 @@ from train.eval import eval, eval_loss
 from utils.logger import logger
 from models.utils.maps.scene_gernerator import process_maps
 
+from utils.config import DATA_FOLDER_PATH
+
 os.environ["OMP_NUM_THREADS"] = "4"
 
 
@@ -36,8 +38,6 @@ def train_worker(
     loss_fn,
     eval_fn,
     data_folder: Path,
-    scene_path: Path,
-    scene_meta_path: Path,
     batch_size: int = 128,
     num_epochs: int = 30,
     norm_clip_value: float = 1.0,
@@ -71,7 +71,7 @@ def train_worker(
 
     if hasattr(model, "rasterizer"):
         print("loading scene layers")
-        path = "/home/bbi/nereus/assets/maps/2_standardized/fh/kiel/" #TODO select scene depending on model
+        path = DATA_FOLDER_PATH / "maps/2_standardized/fh/kiel/" #TODO select scene depending on model
         scene_contiguous = np.ascontiguousarray(process_maps(model.rasterizer, path), dtype=np.float32)
         scene = torch.from_numpy(scene_contiguous).unsqueeze(0).to(device)
     else:
@@ -174,9 +174,7 @@ if __name__ == "__main__":
         loss_fn = loss_intent_heatmap2
         eval_fn = eval_heatmap
 
-    data_folder = Path("/home/bbi/nereus/assets/ais/4_features/fh/kiel")
-    scene_path = Path("data/kiel/scenes/bev.npz")
-    scene_meta_path = Path("data/kiel/scenes/bev_meta.json")
+    data_folder = DATA_FOLDER_PATH / "ais/4_features/fh/kiel"
 
     train_worker(
         dist_args,
@@ -185,8 +183,6 @@ if __name__ == "__main__":
         loss_fn=loss_fn,
         eval_fn=eval_fn,
         data_folder=data_folder,
-        scene_path=scene_path,
-        scene_meta_path=scene_meta_path,
         num_epochs = 10,
         batch_size = 64,
     )

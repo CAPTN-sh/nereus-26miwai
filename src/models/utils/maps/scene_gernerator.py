@@ -7,6 +7,8 @@ import numpy as np
 from models.utils.maps.rasterize import Rasterizer
 import matplotlib.pyplot as plt
 
+from utils.config import DATA_FOLDER_PATH
+
 MAX_DIST = 2000
 MAX_DEPTH = 20
 
@@ -86,7 +88,7 @@ def plot_maps(map_stack, rasterizer):
     plt.savefig("map_validation_with_polygons.png")
 
 # --- Ausführung ---
-path = "/home/bbi/nereus/assets/maps/2_standardized/fh/kiel/"
+path = DATA_FOLDER_PATH / "maps/2_standardized/fh/kiel/"
 my_rasterizer = Rasterizer([10.12, 54.31, 10.33, 54.46])
 
 final_maps = process_maps(my_rasterizer, path)

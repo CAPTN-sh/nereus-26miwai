@@ -58,7 +58,7 @@ class TrAISformer(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def forward(self, batch, scene=None, scene_meta=None):
+    def forward(self, batch, scene=None):
         obs_feat, obs_pos, _, obs_mask, *_ = batch
         B, seqlen, _ = obs_pos.size()
 
@@ -97,5 +97,5 @@ class TrAISformer(nn.Module):
 
         return {"intent_logits": logits}
 
-    def inference(self, batch, scene=None, scene_meta=None):
-        return self.forward(batch, scene, scene_meta), None
+    def inference(self, batch, scene=None):
+        return self.forward(batch, scene), None

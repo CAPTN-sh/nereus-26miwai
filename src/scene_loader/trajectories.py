@@ -10,6 +10,8 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 from scene_loader.normalizer import normalize
 
+from utils.config import SHIP_DB_PATH
+
 def seq_collate(data):
     (
         obs_feat_seq,
@@ -160,9 +162,7 @@ class SceneTrajectoryDataset(Dataset):
         if nodes.empty:
             raise ValueError("There are no values within the given time range.")
 
-        # TODO config
-        ship_db_path = Path("/home/bbi/nereus/assets/ship_db/ship_db.parquet")
-        ship_db = pd.read_parquet(ship_db_path)
+        ship_db = pd.read_parquet(SHIP_DB_PATH)
         nodes = nodes.reset_index().merge(ship_db, on="mmsi")
 
         # edges (see bottom)

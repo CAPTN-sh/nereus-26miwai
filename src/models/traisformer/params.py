@@ -7,8 +7,8 @@ class TraisformerParams:
     full_feat_set: bool = False
     pred_scope: str = "destination" # ["path", "destination"]
     
-    pred_len: int = 12
-    obs_len: int = 144 # fix at 12min
+    pred_len: int = 1 * 12
+    obs_len: int = 10 * 12 # fix at 10min
 
     # bbox
     # TODO from config

@@ -5,8 +5,8 @@ from dataclasses import dataclass
 class LSTMParams:
     # Sequence lengths
     # TODO from data loader config
-    pred_len: int = 3 * 12 # 3 min
-    obs_len: int =  8 * 12 # 8 min
+    pred_len: int = 5 * 12
+    obs_len: int =  10 * 12
 
     # Model dims
     # https://ieeexplore.ieee.org/document/9054421

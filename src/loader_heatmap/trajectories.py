@@ -8,6 +8,8 @@ import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
+from utils.config import SHIP_DB_PATH
+
 def get_interp_step_size(df: pd.DataFrame):
     first_traj = df.loc[df["traj_id"] == df.iloc[0]["traj_id"]].copy()
     ts = first_traj.sort_values("timestamp")["timestamp"]
@@ -46,11 +48,11 @@ class TrajectoryHeatmapDataset(Dataset):
         obs_len=120,
         fut_len=540,
         min_valid_window=12,
-        full_feat_set = True,
-        has_rel_pos = False,
+        normalize = True,
     ):
         super(TrajectoryHeatmapDataset, self).__init__()
 
+        feat_cols = feat_cols.copy()
         self.items = []
         self.feat_map = {}
         self.pos_map = {}
@@ -59,7 +61,6 @@ class TrajectoryHeatmapDataset(Dataset):
         self.fut_len = fut_len
         self.l_pad = max(0, obs_len-min_valid_window)
         self.r_pad = max(0, fut_len-min_valid_window)
-        self.has_rel_pos = has_rel_pos
 
         nodes = pd.read_parquet(nodes_path)
 
@@ -72,28 +73,29 @@ class TrajectoryHeatmapDataset(Dataset):
         if nodes.empty:
             raise ValueError("There are no values within the given time range.")
 
-        # TODO config
-        ship_db_path = Path("/home/bbi/nereus/assets/ship_db/ship_db.parquet")
-        ship_db = pd.read_parquet(ship_db_path)
+        ship_db = pd.read_parquet(SHIP_DB_PATH)
         nodes = nodes.reset_index().merge(ship_db, on="mmsi")
         nodes = cords_to_meters(nodes)
 
-        if full_feat_set:
-            nodes["length"] = np.log1p(nodes['to_bow'] + nodes['to_stern']) / np.log1p(400)
-            nodes["width"] = np.log1p(nodes['to_port'] + nodes['to_starboard']) / np.log1p(60)
-            nodes["sailing"] = nodes["ship_group"] == "sailing"
-            nodes["cargo"] = nodes["ship_group"] == "cargo"
-            nodes["passenger"] = nodes["ship_group"] == "passenger"
+        nodes["length"] = np.log1p(nodes['to_bow'] + nodes['to_stern']) / np.log1p(400)
+        nodes["width"] = np.log1p(nodes['to_port'] + nodes['to_starboard']) / np.log1p(60)
+        nodes["sailing"] = nodes["ship_group"] == "sailing"
+        nodes["cargo"] = nodes["ship_group"] == "cargo"
+        nodes["passenger"] = nodes["ship_group"] == "passenger"
 
-            feat_cols += [
-                "acc",
-                "angular_difference",
-                "length", 
-                "width", 
-                "sailing",
-                "cargo",
-                "passenger",
-            ]
+        feat_cols += ["acc", "angular_difference", "length",  "width",  "sailing", "cargo", "passenger"]
+
+        if normalize:
+            nodes["speed"] = nodes["speed"] / 40
+            nodes["acc"] = nodes["acc"] / 4
+
+            for col in ['course', 'angular_difference']:
+                rad = np.deg2rad(nodes[col])
+                nodes[col + "_sin"] = np.sin(rad)
+                nodes[col + "_cos"] = np.cos(rad)
+                feat_cols += [col + "_sin", col + "_cos"]
+                feat_cols.remove(col)
+
 
         for traj_id, group in tqdm(nodes.groupby("traj_id")):
             group = group.sort_values("time").reset_index(drop=True)
@@ -129,9 +131,6 @@ class TrajectoryHeatmapDataset(Dataset):
 
         obs_mask = torch.arange(cur_t - self.obs_len, cur_t) >= self.l_pad
         fut_mask = torch.arange(cur_t, cur_t + self.fut_len) < (len(abs_pos) - self.r_pad)
-
-        if not self.has_rel_pos:
-            return obs_feat, obs_pos, torch.tensor([]), obs_mask, fut_pos, torch.tensor([]), fut_mask, fin_pos 
         
         rel_pos = self.rel_map[traj_id]
         obs_rel = torch.from_numpy(rel_pos[cur_t - self.obs_len : cur_t]).float()
