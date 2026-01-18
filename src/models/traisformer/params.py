@@ -4,7 +4,6 @@ from dataclasses import dataclass
 @dataclass
 class TraisformerParams:
     # Sequence lengths
-    full_feat_set: bool = False
     pred_scope: str = "destination" # ["path", "destination"]
     
     pred_len: int = 1 * 12

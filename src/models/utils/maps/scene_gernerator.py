@@ -21,7 +21,7 @@ def process_maps(rasterizer: Rasterizer, base_path):
     
     # Hilfsfunktion für GeoJSON (Vektor -> Distanz-Grid)
     def geojson_to_dist(file_name):
-        gdf = gpd.read_file(base_path + file_name)
+        gdf = gpd.read_file(base_path / file_name)
         # In das Ziel-System (UTM) transformieren
         gdf = gdf.to_crs(crs_target)
         
@@ -42,7 +42,7 @@ def process_maps(rasterizer: Rasterizer, base_path):
 
     # Hilfsfunktion für TIFF (Raster -> Resampled Grid)
     def tiff_to_grid(file_name):
-        with rasterio.open(base_path + file_name) as src:
+        with rasterio.open(base_path / file_name) as src:
             out_data = np.zeros(target_shape, dtype=np.float32)
             reproject(
                 source=rasterio.band(src, 1),

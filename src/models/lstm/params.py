@@ -10,5 +10,5 @@ class LSTMParams:
 
     # Model dims
     # https://ieeexplore.ieee.org/document/9054421
-    enc_hidden_size: int = 64
-    dec_hidden_size: int = 64
+    enc_hidden_size: int = 128
+    dec_hidden_size: int = 128

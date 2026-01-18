@@ -147,8 +147,8 @@ def train_single_gpu(
     total_batches = 0
     num_batches = 0
     loss_sum = 0.0
-    max_batches = 80_000
-    batches_per_eval = 2_000
+    max_batches = 20_000
+    batches_per_eval = 1_000
     
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -158,8 +158,8 @@ def train_single_gpu(
 
     """
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, 
-        factor=0.1, 
+        optimizer,
+        factor=0.1,
         patience=4,
         cooldown=2,
         min_lr=1e-6,
@@ -240,7 +240,6 @@ def make_objective(
     model_choice: str,
     data_folder: Path,
     pred_scope: str,
-    full_feat_set: bool,
 ):
     # pick model
     if model_choice == "DESIRE":
@@ -259,56 +258,29 @@ def make_objective(
 
     def objective(trial: optuna.Trial):
         # --- general params ---
-        batch_size = trial.suggest_categorical("batch_size", [256])
+        batch_size = trial.suggest_categorical("batch_size", [512])
+        lr = trial.suggest_float("lr", 1e-5, 5e-3, log=True)
+        weight_decay = trial.suggest_float("weight_decay",  1e-6, 1e-3, log=True)
 
         if (model_choice == "LSTM"):
-            obs_minutes = trial.suggest_categorical("obs_minutes", [1, 3, 5, 8, 10, 12, 15, 20])
-            cfg.obs_len = obs_minutes * 12
-
-            lr = trial.suggest_float("lr", 1e-3, 1e-3, log=True)
-            weight_decay = trial.suggest_float("weight_decay",  1e-5, 1e-5, log=True)
-            hidden_size = trial.suggest_categorical("hidden_size", [512])
-
-            #lr = trial.suggest_float("lr", 1e-5, 5e-3, log=True)
-            #weight_decay = trial.suggest_float("weight_decay",  1e-6, 1e-3, log=True)
-            #hidden_size = trial.suggest_categorical("hidden_size", [32, 48, 64, 80, 96])
-
+            hidden_size = trial.suggest_categorical("hidden_size", [128, 256, 512])
             cfg.enc_hidden_size = hidden_size
             cfg.dec_hidden_size = hidden_size
 
         # --- traisformer params ---
         if (model_choice == "TRAISFORMER"):
-            obs_minutes = trial.suggest_categorical("obs_minutes", [1, 3, 5, 8, 10, 12, 15, 20])
-            cfg.obs_len = obs_minutes * 12
-
             cfg.pred_scope = pred_scope
-            cfg.full_feat_set = full_feat_set
 
             if pred_scope == "path":
-                cfg.pred_len = 45 * 12
+                cfg.pred_len = 20 * 12
 
-            lr = trial.suggest_float("lr", 1e-4, 1e-4, log=True)
-            weight_decay = trial.suggest_float("weight_decay",  1e-5, 1e-5, log=True)
-            cfg.n_layer = trial.suggest_int("n_layer", 4, 4, step=2)
-            cfg.n_head = trial.suggest_categorical("n_head", [4])
-            head_dim = trial.suggest_int("head_dim", 64, 64, step=32)
-
-            cfg.dropout = trial.suggest_float("dropout", 0.1, 0.1, step=0.05)
-            cfg.attn_dropout = trial.suggest_float("attn_dropout", 0.1, 0.1, step=0.05)
-            cfg.coarse_loss_beta = trial.suggest_categorical("coarse_loss_beta", [1.0])
-
-            #lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
-            # weight_decay = trial.suggest_float("weight_decay",  1e-6, 1e-3, log=True)
-
-            #cfg.n_layer = trial.suggest_int("n_layer", 2, 8, step=2)
-            #cfg.n_head = trial.suggest_categorical("n_head", [4, 8])
-            #head_dim = trial.suggest_int("head_dim", 32, 128, step=32)
+            cfg.n_layer = trial.suggest_int("n_layer", 2, 8, step=2)
+            cfg.n_head = trial.suggest_categorical("n_head", [4, 8])
+            head_dim = trial.suggest_categorical("head_dim", [32, 64, 96, 128])
             cfg.n_embd = cfg.n_head * head_dim
 
-            cat_meta = [("spatial", [4], 2), ("kinematic", [2], 2), ("dynamic", [1], 2), ("terrain", [2], 1), ("vessel", [2], 1)]
-            #cat_meta = [("spatial", [4], 2), ("kinematic", [0,1,2,4], 2)]
-            #if cfg.full_feat_set:
-            #    cat_meta += [("dynamic", [0,1,2,4], 2), ("terrain", [0,1,2,4], 1), ("vessel", [0,1,2,4], 1)]
+            cat_meta = [("spatial", [4], 2), ("kinematic", [0,1,2,4], 2)]
+            cat_meta += [("dynamic", [0,1,2,4], 2), ("terrain", [0,1,2,4], 1), ("vessel", [0,1,2,4], 1)]
 
             names, _, costs = zip(*cat_meta)
             splits = [trial.suggest_categorical(f"n_{n}", r) for n, r, c in cat_meta]
@@ -320,10 +292,10 @@ def make_objective(
             for name, cost, value in zip(names, costs, embd):
                 setattr(cfg, f"n_{name}_embd", int(value * 16 // cost))
 
-            #cfg.dropout = trial.suggest_float("dropout", 0.0, 0.3, step=0.05)
-            #cfg.attn_dropout = trial.suggest_float("attn_dropout", 0.0, 0.2, step=0.05)
+            cfg.dropout = trial.suggest_float("dropout", 0.0, 0.3, step=0.05)
+            cfg.attn_dropout = trial.suggest_float("attn_dropout", 0.0, 0.2, step=0.05)
 
-            #cfg.coarse_loss_beta = trial.suggest_categorical("coarse_loss_beta", [0.0, 0.5, 1.0, 2.0])
+            cfg.coarse_loss_beta = trial.suggest_categorical("coarse_loss_beta", [0.0, 0.5, 1.0, 2.0])
         try:
             metric = train_single_gpu(
                 model_cls=model_cls,
@@ -369,19 +341,19 @@ def run_worker():
     logger(file_prefix=f"optuna_worker_{model_choice}")
     logging.info(study_name)
 
-    if True:
+    if False:
         sampler = optuna.samplers.GridSampler({
             "obs_minutes": [1, 3, 5, 8, 10, 12, 15, 20],
         })
         pruner = optuna.pruners.NopPruner()
     else:
         sampler = optuna.samplers.TPESampler(
-            multivariate=True, 
+            multivariate=True,
             constant_liar=True,
         )
 
         pruner = optuna.pruners.PercentilePruner(
-            percentile=10.0,
+            percentile=10,
             n_startup_trials=10,
             n_warmup_steps=8,
         )
@@ -399,12 +371,11 @@ def run_worker():
         model_choice=model_choice,
         data_folder=data_folder,
         pred_scope = "destination", # "path" "destination"
-        full_feat_set=True,
     )
 
     cb = trial_jsonl_callback(jsonl_path)
 
-    study.optimize(objective, n_trials=2, gc_after_trial=True, callbacks=[cb])
+    study.optimize(objective, n_trials=25, gc_after_trial=True, callbacks=[cb])
 
     if study.best_trial is not None:
         logging.info(f"BEST value={study.best_value}")
@@ -416,8 +387,8 @@ if __name__ == "__main__":
 """
 CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///lstm_rel.db" OPTUNA_STUDY="lstm_rel" OPTUNA_JSONL="lstm_rel.jsonl" python -u src/train/train_tune.py
 
-CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///obs_len_traisformer.db" OPTUNA_STUDY="obs_len_traisformer" OPTUNA_JSONL="obs_len_traisformer.jsonl" python -u src/train/train_tune.py
-CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///obs_len_traisformer.db" OPTUNA_STUDY="obs_len_traisformer" OPTUNA_JSONL="obs_len_traisformer.jsonl" python -u src/train/train_tune.py
+CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///path_traisformer.db" OPTUNA_STUDY="path_traisformer" OPTUNA_JSONL="path_traisformer.jsonl" python -u src/train/train_tune.py
+CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///dest_traisformer.db" OPTUNA_STUDY="dest_traisformer" OPTUNA_JSONL="dest_traisformer.jsonl" python -u src/train/train_tune.py
 
-CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///obs_len_lstm_512.db" OPTUNA_STUDY="obs_len_lstm_512" OPTUNA_JSONL="obs_len_lstm_512.jsonl" python -u src/train/train_tune.py
+CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///obs_len_lstm_512.db" OPTUNA_STUDY="obs_len_lstm_512" OPTUNA_JSONL="obs_len_lstm_512.jsonl" python -u src/train/train_tune.py
 """

@@ -148,7 +148,7 @@ def train_single_gpu(
     eval_step = 0
     loss_sum = 0.0
     max_batches = 40_000        # 40_000 bei batchsize 64
-    batches_per_eval = 2_000    # 2_000
+    batches_per_eval = 1_000    # 1_000
     
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -240,7 +240,6 @@ def make_objective(
     model_choice: str,
     data_folder: Path,
     pred_scope: str,
-    full_feat_set: bool,
 ):
     # pick model
     if model_choice == "DESIRE":
@@ -334,7 +333,6 @@ def run_worker():
         model_choice=model_choice,
         data_folder=data_folder,
         pred_scope = "path", # "path" "destination"
-        full_feat_set=True,
     )
 
     cb = trial_jsonl_callback(jsonl_path)
@@ -351,6 +349,6 @@ if __name__ == "__main__":
 
 """
 
-CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_rel.db" OPTUNA_STUDY="desire_rel" OPTUNA_JSONL="desire_rel.jsonl" python -u src/train/train_tune_desire.py
+CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_rel.db" OPTUNA_STUDY="desire_rel" OPTUNA_JSONL="desire_rel.jsonl" python -u src/train/train_tune_desire.py
 
 """
