@@ -129,7 +129,7 @@ def train_single_gpu(
         max_date=pd.Timestamp("2024-01-01"),
         world_size=1,
         rank=0,
-        batch_size=256,
+        batch_size=batch_size,
         pin_memory=True,
         feat_cols=feat_cols,
         fut_len=cfg.pred_len,
