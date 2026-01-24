@@ -35,5 +35,5 @@ class TraisformerParams:
     attn_dropout: float = 0.1
 
     # loss
-    coarse_loss_beta: float = 1
+    coarse_loss_beta: float = 1.0
     coarse_loss_pool_size: int = 3

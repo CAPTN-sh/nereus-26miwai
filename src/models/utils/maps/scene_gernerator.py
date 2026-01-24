@@ -88,11 +88,12 @@ def plot_maps(map_stack, rasterizer):
     plt.savefig("map_validation_with_polygons.png")
 
 # --- Ausführung ---
-path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/"
-my_rasterizer = Rasterizer([10.12, 54.31, 10.33, 54.46])
+if __name__ == "__main__":
+    path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/"
+    my_rasterizer = Rasterizer([10.12, 54.31, 10.33, 54.46])
 
-final_maps = process_maps(my_rasterizer, path)
-plot_maps(final_maps, my_rasterizer)
+    final_maps = process_maps(my_rasterizer, path)
+    plot_maps(final_maps, my_rasterizer)
 
-print(f"Grid Size: {my_rasterizer.x_size}x{my_rasterizer.y_size}")
-print(f"Map Stack Shape: {final_maps.shape}")
+    print(f"Grid Size: {my_rasterizer.x_size}x{my_rasterizer.y_size}")
+    print(f"Map Stack Shape: {final_maps.shape}")

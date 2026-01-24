@@ -1,16 +1,15 @@
 from dataclasses import dataclass
 
-import torch.nn as nn
-
+from utils.config import STEPS_PER_MINUTE
 
 @dataclass
 class DESIREParams:
     # general (fix)
     pred_dim: int = 2
-    obs_len: int = 10 * 12
-    pred_len: int = 5 * 12
+    obs_len: int = 10 * STEPS_PER_MINUTE
+    pred_len: int = 5 * STEPS_PER_MINUTE
 
-    num_refine_iters: int = 2 # 1 3:36  # 5 7:12:57
+    num_refine_iters: int = 2
     hidden_size: int = 32
     intermediate_size: int = 16
 

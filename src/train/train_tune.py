@@ -279,12 +279,18 @@ def make_objective(
             if pred_scope == "path":
                 cfg.pred_len = 20 * STEPS_PER_MINUTE
 
-            cfg.n_layer = trial.suggest_int("n_layer", 4, 8, step=2)
+            cfg.n_layer = trial.suggest_categorical("n_layer", [4, 6])
             cfg.n_head = trial.suggest_categorical("n_head", [4, 8])
-            cfg.n_embd = trial.suggest_categorical("n_embd", [256, 512, 1024])
+            cfg.n_embd = trial.suggest_categorical("n_embd", [256, 512])
+            
+            cfg.dropout = trial.suggest_float("dropout", 0.0, 0.3, step=0.05)
+            cfg.attn_dropout = trial.suggest_float("attn_dropout", 0.0, 0.2, step=0.05)
+
+            cfg.coarse_loss_beta = trial.suggest_categorical("coarse_loss_beta", [0.0, 0.5, 1.0])
 
             cat_meta = [("spatial", [4], 2), ("kinematic", [2], 2)]
-            cat_meta += [("dynamic", [0,1,2], 2), ("terrain", [0,1,2], 1), ("vessel", [0,1,2], 1)]
+            # cat_meta += [("dynamic", [0,1,2], 2), ("terrain", [0,1,2], 1), ("vessel", [0,1,2], 1)]
+            cat_meta += [("dynamic", [1], 2), ("terrain", [1], 1), ("vessel", [1], 1)]
 
             names, _, costs = zip(*cat_meta)
             splits = [trial.suggest_categorical(f"n_{n}", r) for n, r, c in cat_meta]
@@ -299,11 +305,6 @@ def make_objective(
                 print_dim += f" {name}:{value * 8}"
                 setattr(cfg, f"n_{name}_embd", int(value * 8 // cost))
             logging.info(print_dim)
-
-            cfg.dropout = trial.suggest_float("dropout", 0.0, 0.3, step=0.05)
-            cfg.attn_dropout = trial.suggest_float("attn_dropout", 0.0, 0.2, step=0.05)
-
-            cfg.coarse_loss_beta = trial.suggest_categorical("coarse_loss_beta", [0.0, 0.5, 1.0])
         try:
             metric = train_single_gpu(
                 model_cls=model_cls,
@@ -405,11 +406,10 @@ CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///obs_lstm.db" 
 CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///lstm_rel.db" OPTUNA_STUDY="lstm_rel" OPTUNA_JSONL="lstm_rel.jsonl" python -u src/train/train_tune.py
 
 [Experiment 3] TrAISfromer:
-CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///path_traisformer.db" OPTUNA_STUDY="path_traisformer" OPTUNA_JSONL="path_traisformer.jsonl" python -u src/train/train_tune.py
+CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///dest_trais_base.db" OPTUNA_STUDY="dest_trais_base" OPTUNA_JSONL="dest_trais_base.jsonl" python -u src/train/train_tune.py
+CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///path_trais_base.db" OPTUNA_STUDY="path_trais_base" OPTUNA_JSONL="path_trais_base.jsonl" python -u src/train/train_tune.py
 
 
-CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///path_traisformer.db" OPTUNA_STUDY="path_traisformer" OPTUNA_JSONL="path_traisformer.jsonl" python -u src/train/train_tune.py
-CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///dest_traisformer.db" OPTUNA_STUDY="dest_traisformer" OPTUNA_JSONL="dest_traisformer.jsonl" python -u src/train/train_tune.py
 
 CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///obs_len_lstm_512.db" OPTUNA_STUDY="obs_len_lstm_512" OPTUNA_JSONL="obs_len_lstm_512.jsonl" python -u src/train/train_tune.py
 """

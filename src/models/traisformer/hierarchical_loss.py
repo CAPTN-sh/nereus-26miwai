@@ -50,16 +50,14 @@ def loss_intent_heatmap(
         hit5 = (top5_indices == target_indices.unsqueeze(1)).any(dim=1).float().mean()
 
         # --- Mean Target Probability (MTP) ---
-        target_probs = probs_fine.gather(1, target_indices.unsqueeze(1))
-        
-        nll_gt = -(target_probs + 1e-8).log().mean()
-        p_gt = target_probs.mean()
+        p_gt = probs_fine.gather(1, target_indices.unsqueeze(1)).mean()
 
     # 6. Gesamt-Loss
     loss = ce_fine + config.coarse_loss_beta * ce_coarse
 
     return loss, {
-        "nll_gt": nll_gt,
+        "ce_fine": ce_fine,
+        "ce_coarse": ce_coarse,
         "p_gt": p_gt,
         "hit1": hit1,
         "hit5": hit5,
@@ -116,9 +114,7 @@ def loss_occupancy_heatmap(
     # 5. Thesis Metrics (Probability Allocation)
     with torch.no_grad():
         # Probability Mass Coverage / path coverage
-        p_gt = torch.sum(probs_fine * (target_flat > 0), dim=1)
-        pmc = p_gt.mean()
-        nll_gt = -(p_gt + 1e-8).log().mean()
+        pmc = torch.sum(probs_fine * (target_flat > 0), dim=1).mean()
         
         # Distribution Overlap
         overlap = torch.sum(torch.min(target_flat, probs_fine), dim=1).mean()
@@ -127,7 +123,8 @@ def loss_occupancy_heatmap(
     loss = ce_fine + config.coarse_loss_beta * ce_coarse
 
     return loss, {
-        "nll_gt": nll_gt,
+        "ce_fine": ce_fine,
+        "ce_coarse": ce_coarse,
         "pmc": pmc,
         "overlap": overlap,
     }
