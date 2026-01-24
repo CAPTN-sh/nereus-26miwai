@@ -71,7 +71,7 @@ def train_worker(
 
     if hasattr(model, "rasterizer"):
         print("loading scene layers")
-        path = DATA_FOLDER_PATH / "maps/2_standardized/fh/kiel/" #TODO select scene depending on model
+        path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/" #TODO select scene depending on model
         scene_contiguous = np.ascontiguousarray(process_maps(model.rasterizer, path), dtype=np.float32)
         scene = torch.from_numpy(scene_contiguous).unsqueeze(0).to(device)
     else:
@@ -174,7 +174,7 @@ if __name__ == "__main__":
         loss_fn = loss_intent_heatmap2
         eval_fn = eval_heatmap
 
-    data_folder = DATA_FOLDER_PATH / "ais/4_features/fh/kiel"
+    data_folder = DATA_FOLDER_PATH / "ais/4_features/fh_10/kiel"
 
     train_worker(
         dist_args,

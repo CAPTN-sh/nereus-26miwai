@@ -17,7 +17,7 @@ def plot_traj(
     fig, ax = plt.subplots(figsize=(50, 50))
 
     # TODO config
-    map_path = DATA_FOLDER_PATH / "maps/2_standardized/fh/kiel/land.geojson"
+    map_path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/land.geojson"
     background = gpd.read_file(map_path).to_crs("EPSG:25832")
     background.plot(ax=ax, facecolor="lightgray", edgecolor="black", alpha=0.5)
 

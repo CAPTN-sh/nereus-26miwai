@@ -1,9 +1,6 @@
-import torch
 import logging
 
-import numpy as np
 import torch
-import torch.nn.functional as F
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -14,13 +11,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import os
 from functools import lru_cache
-from pathlib import Path
 
-import geopandas as gpd
-import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
-import numpy as np
-import torch
 
 def mse(pred_rel, batch, config = None):
     *_, fut_rel, fut_mask, _ = batch
@@ -32,17 +23,10 @@ def fde_per_agent(pred_abs, fut_pos, fut_mask):
     B, T, _ = pred_abs.shape
 
     dist = torch.norm(pred_abs - fut_pos, dim=-1)  # [B, T]
-    mask = fut_mask.bool()
+    full_traj_mask = fut_mask.bool().all(dim=1)
 
-    fde = torch.zeros(B, device=pred_abs.device)
-
-    for a in range(B):
-        valid_idx = mask[a].nonzero(as_tuple=False)
-        if len(valid_idx) > 0:
-            last_t = valid_idx[-1, 0]
-            fde[a] = dist[a, last_t]
-
-    return fde.mean()
+    fde = dist[:, -1][full_traj_mask]
+    return fde
 
 def ade_per_agent(pred_abs, fut_pos, fut_mask):
     dist = torch.norm(pred_abs - fut_pos, dim=-1)     # [B, T]
@@ -51,7 +35,7 @@ def ade_per_agent(pred_abs, fut_pos, fut_mask):
     dist_sum = (dist * mask).sum(dim=1)
     ade_agent = dist_sum / mask.sum(dim=1)
 
-    return ade_agent.mean()
+    return ade_agent
 
 def eval_lstm(
     epoch: int,
@@ -71,8 +55,9 @@ def eval_lstm(
 
     num_batches = 0
     ade_sum = 0.0
+    n_ade = 0
     fde_sum = 0.0
-    count = 0
+    n_fde = 0
 
     plotted = True
     n_plots = 3
@@ -90,9 +75,14 @@ def eval_lstm(
             _, obs_pos, _, obs_mask, fut_pos, _, fut_mask, _ = batch
             pred_abs = torch.cumsum(pred_rel, dim=1) + obs_pos[:, -1:, :] 
 
-            ade_sum += float(ade_per_agent(pred_abs, fut_pos, fut_mask).item())
-            fde_sum += float(fde_per_agent(pred_abs, fut_pos, fut_mask).item())
-            count += 1
+            ade = ade_per_agent(pred_abs, fut_pos, fut_mask)
+            ade_sum += ade.sum().item()
+            n_ade += ade.numel()
+
+            fde = fde_per_agent(pred_abs, fut_pos, fut_mask)
+            fde_sum += fde.sum().item()
+            n_fde += fde.numel()
+
 
             if not plotted:
                 plotted = True 
@@ -105,8 +95,8 @@ def eval_lstm(
                     epoch = epoch,
                 )
 
-    ade_avg = ade_sum / max(1, count)
-    fde_avg = fde_sum / max(1, count)
+    ade_avg = ade_sum / n_ade
+    fde_avg = fde_sum / n_fde
 
     logging.info(f"[Eval] epoch={epoch} ade={ade_avg:.6f} fde={fde_avg:.6f}")
     return ade_avg

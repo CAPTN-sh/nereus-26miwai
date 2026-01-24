@@ -4,14 +4,14 @@ import torch
 import torch.nn as nn
 
 class Rasterizer(nn.Module):
-    def __init__(self, bbox):
+    def __init__(self, bbox, pos_res = 50):
         super().__init__()
         # TODO transformer from config
         transformer = pyproj.Transformer.from_crs(
             pyproj.CRS("EPSG:4326"), pyproj.CRS("EPSG:25832"), always_xy=True
         )
 
-        self.pos_res = 50
+        self.pos_res = pos_res
         self.x_min, self.y_min = np.floor(transformer.transform(*bbox[:2]))
         self.x_max, self.y_max = np.ceil(transformer.transform(*bbox[2:]))
         self.x_size = int((self.x_max - self.x_min) / self.pos_res)

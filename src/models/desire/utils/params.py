@@ -7,10 +7,10 @@ import torch.nn as nn
 class DESIREParams:
     # general (fix)
     pred_dim: int = 2
-    obs_len: int = 12 * 12
-    pred_len: int = 3 * 12
+    obs_len: int = 10 * 12
+    pred_len: int = 5 * 12
 
-    num_refine_iters: int = 3
+    num_refine_iters: int = 2 # 1 3:36  # 5 7:12:57
     hidden_size: int = 32
     intermediate_size: int = 16
 

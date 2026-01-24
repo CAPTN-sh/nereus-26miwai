@@ -5,6 +5,8 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from loader_heatmap.trajectories import TrajectoryHeatmapDataset
 
+from utils.config import AIS_SOURCE
+
 def loader_heatmap(
     data_folder: Path,
     flag: str,
@@ -19,7 +21,7 @@ def loader_heatmap(
     obs_len = 120,
 ):
 
-    file_name = f"{data_folder.parent.name}_{data_folder.name}_{flag}"
+    file_name = f"{AIS_SOURCE}_{data_folder.name}_{flag}"
     dset = TrajectoryHeatmapDataset(
         nodes_path=data_folder / f"{file_name}_ship_features.parquet",
         min_date=min_date,

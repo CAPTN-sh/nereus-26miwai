@@ -8,23 +8,15 @@ import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from utils.config import SHIP_DB_PATH
+from utils.config import SHIP_DB_PATH, STEPS_PER_MINUTE, STEP_SIZE
 
-def get_interp_step_size(df: pd.DataFrame):
-    first_traj = df.loc[df["traj_id"] == df.iloc[0]["traj_id"]].copy()
-    ts = first_traj.sort_values("timestamp")["timestamp"]
-    step_size = int((ts.iloc[1] - ts.iloc[0]).total_seconds())
-    return step_size
-
-def process_time(
-    df: pd.DataFrame, min_date: pd.Timestamp, max_date: pd.Timestamp, step_size: int
-) -> pd.DataFrame:
+def process_time(df: pd.DataFrame, min_date: pd.Timestamp, max_date: pd.Timestamp) -> pd.DataFrame:
     df = (
         df[df["timestamp"].between(min_date, max_date + timedelta(days=1))]
         .copy()
         .reset_index(drop=True)
     )
-    df["time"] = df["timestamp"].astype("datetime64[s]").astype("int64") // step_size
+    df["time"] = df["timestamp"].astype("datetime64[s]").astype("int64") // STEP_SIZE
     df = df.set_index("time").sort_index()
     return df
 
@@ -45,12 +37,14 @@ class TrajectoryHeatmapDataset(Dataset):
         min_date: pd.Timestamp,
         max_date: pd.Timestamp,
         feat_cols=[],
-        obs_len=120,
-        fut_len=540,
-        min_valid_window=12,
-        normalize = True,
+        obs_len=60,
+        fut_len=120,
+        min_len_in_minutes=1,
+        normalize = False,
     ):
         super(TrajectoryHeatmapDataset, self).__init__()
+
+        min_valid_window = min_len_in_minutes * STEPS_PER_MINUTE
 
         feat_cols = feat_cols.copy()
         self.items = []
@@ -65,8 +59,7 @@ class TrajectoryHeatmapDataset(Dataset):
         nodes = pd.read_parquet(nodes_path)
 
         # remove traj without destination
-        step_size = get_interp_step_size(nodes)
-        nodes = process_time(nodes, min_date, max_date, step_size)
+        nodes = process_time(nodes, min_date, max_date)
 
         nodes = nodes[nodes.groupby('traj_id')['is_entry'].transform('last') == 1]
 

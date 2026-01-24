@@ -40,13 +40,13 @@ def eval_heatmap(
 
     hit1_sum = 0.0
     hit5_sum = 0.0
-    mde_sum = 0.0
-    mtp_sum = 0.0
+    min_dist_5_sum = 0.0
+    target_prob_sum = 0.0
 
-    precision_sum = 0.0
-    recall_sum = 0.0
+    pmc_sum = 0.0
+    overlap_sum = 0.0
 
-    plotted = True
+    plotted = False
     n_plots = 5
 
     with torch.inference_mode():
@@ -61,14 +61,14 @@ def eval_heatmap(
             
             if config.pred_scope == "path":
                 loss, loss_dict = loss_occupancy_heatmap(output, batch, config=config)
-                precision_sum += float(loss_dict["precision"])
-                recall_sum += float(loss_dict["recall"])
+                pmc_sum += float(loss_dict["pmc"])
+                overlap_sum += float(loss_dict["overlap"])
             if config.pred_scope == "destination":
                 loss, loss_dict = loss_intent_heatmap(output, batch, config=config)
                 hit1_sum += float(loss_dict["hit1"])
                 hit5_sum += float(loss_dict["hit5"])
-                mde_sum += float(loss_dict["mde_meters"])
-                mtp_sum += float(loss_dict["mean_target_prob"])
+                min_dist_5_sum += float(loss_dict["min_dist_5_meters"])
+                target_prob_sum += float(loss_dict["mean_target_prob"])
 
             # Summiere alle Werte auf
             loss_sum += float(loss.item())
@@ -93,11 +93,11 @@ def eval_heatmap(
                 for i in range(min(n_plots, B)):
                     obs_i = obs_pos[i][obs_mask[i]]
                     p_hmap = probs.view(B, x_bins, y_bins)[i].detach().cpu().numpy()
-                    plot_heatmap(f"pred_heatmap_tn{trial_number}_p{i}", p_hmap, epoch=epoch)
+                    plot_heatmap(f"pred_heatmap_{config.pred_scope[:4]}_tn{trial_number}_{i}", p_hmap, epoch=epoch)
 
                     if epoch == 1:
                         t_hmap = target.view(B, x_bins, y_bins)[i].detach().cpu().numpy()
-                        plot_heatmap(f"target_heatmap_p{i}", t_hmap)
+                        plot_heatmap(f"target_heatmap_{config.pred_scope[:4]}_{i}", t_hmap)
 
     # Durchschnittsberechnung
     loss_avg = loss_sum / num_batches
@@ -105,15 +105,17 @@ def eval_heatmap(
     ce_coarse_avg = ce_coarse_sum / num_batches
     
     if config.pred_scope == "path":
-        precision_avg = precision_sum / num_batches
-        recall_avg = recall_sum / num_batches
-        logging.info(f"[Eval HeatMap] Epoch {epoch} - Loss Total: {loss_avg:.6f} ce_fine: {ce_fine_avg:.4f}, ce_coarse: {ce_coarse_avg:.4f}, precision_avg: {precision_avg:.2%}, recall_avg: {recall_avg:.2%}")
+        pmc_avg = pmc_sum / num_batches
+        overlap_avg = overlap_sum / num_batches
+        logging.info(f"[Eval HeatMap] Epoch {epoch} - Loss Total: {loss_avg:.6f} ce_fine: {ce_fine_avg:.4f}, ce_coarse: {ce_coarse_avg:.4f}, pmc_avg: {pmc_avg:.2%}, overlap_avg: {overlap_avg:.2%}")
+    
+        return pmc_avg
+    
     if config.pred_scope == "destination":
         hit1_avg = hit1_sum / num_batches
         hit5_avg = hit5_sum / num_batches
-        mde_avg = mde_sum / num_batches
-        mtp_avg = mtp_sum / num_batches
-        logging.info(f"[Eval HeatMap] Epoch {epoch} - Loss Total: {loss_avg:.6f} ce_fine: {ce_fine_avg:.4f}, ce_coarse: {ce_coarse_avg:.4f}, hit@1: {hit1_avg:.2%}, hit@5: {hit5_avg:.2%}, MDE: {mde_avg:.2f} m, MTP: {mtp_avg:.2%}")
-    model.train()
-    
-    return ce_fine_avg
+        min_dist_5_avg = min_dist_5_sum / num_batches
+        target_prob_avg = target_prob_sum / num_batches
+        logging.info(f"[Eval HeatMap] Epoch {epoch} - Loss Total: {loss_avg:.6f} ce_fine: {ce_fine_avg:.4f}, ce_coarse: {ce_coarse_avg:.4f}, hit@1: {hit1_avg:.2%}, hit@5: {hit5_avg:.2%}, minDE: {min_dist_5_avg:.2f}m, TProb: {target_prob_avg:.2%}")
+        
+        return min_dist_5_avg

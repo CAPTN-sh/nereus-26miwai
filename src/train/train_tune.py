@@ -28,7 +28,7 @@ from train.early_stopper import EarlyStopper
 from models.utils.maps.scene_gernerator import process_maps
 from models.utils.maps.rasterize import Rasterizer
 
-from utils.config import DATA_FOLDER_PATH
+from utils.config import DATA_FOLDER_PATH, STEPS_PER_MINUTE
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -138,7 +138,7 @@ def train_single_gpu(
 
     model = model_cls(cfg).to(device)
 
-    path = DATA_FOLDER_PATH / "maps/2_standardized/fh/kiel/"
+    path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/"
     my_rasterizer = Rasterizer([10.12, 54.31, 10.33, 54.46])
 
     scene_contiguous = np.ascontiguousarray(process_maps(my_rasterizer, path))
@@ -259,38 +259,52 @@ def make_objective(
     def objective(trial: optuna.Trial):
         # --- general params ---
         batch_size = trial.suggest_categorical("batch_size", [512])
-        lr = trial.suggest_float("lr", 1e-5, 5e-3, log=True)
-        weight_decay = trial.suggest_float("weight_decay",  1e-6, 1e-3, log=True)
+        cfg.obs_len = 10 * STEPS_PER_MINUTE
 
         if (model_choice == "LSTM"):
-            hidden_size = trial.suggest_categorical("hidden_size", [128, 256, 512])
+            lr = trial.suggest_categorical("lr",  [1e-4, 5e-4, 1e-3, 3e-3])
+            weight_decay = trial.suggest_categorical("weight_decay",  [1e-6, 1e-5, 1e-4])
+            hidden_size = trial.suggest_categorical("hidden_size", [256, 512, 1024])
             cfg.enc_hidden_size = hidden_size
             cfg.dec_hidden_size = hidden_size
 
         # --- traisformer params ---
         if (model_choice == "TRAISFORMER"):
+            lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
+            weight_decay = trial.suggest_float("weight_decay",  1e-6, 1e-4, log=True)
+
             cfg.pred_scope = pred_scope
+            logging.info(f"pred_scope={pred_scope}")
 
             if pred_scope == "path":
-                cfg.pred_len = 20 * 12
+                cfg.pred_len = 20 * STEPS_PER_MINUTE
 
             cfg.n_layer = trial.suggest_int("n_layer", 2, 8, step=2)
             cfg.n_head = trial.suggest_categorical("n_head", [4, 8])
-            head_dim = trial.suggest_categorical("head_dim", [32, 64, 96, 128])
+            head_dim = trial.suggest_categorical("head_dim", [32, 64, 128])
             cfg.n_embd = cfg.n_head * head_dim
 
             cat_meta = [("spatial", [4], 2), ("kinematic", [0,1,2,4], 2)]
             cat_meta += [("dynamic", [0,1,2,4], 2), ("terrain", [0,1,2,4], 1), ("vessel", [0,1,2,4], 1)]
 
+            # fixed split
+            cat_meta = [("spatial", [4], 2), ("kinematic", [2], 2)]
+            cat_meta += [("dynamic", [1], 2), ("terrain", [1], 1), ("vessel", [1], 1)]
+
             names, _, costs = zip(*cat_meta)
             splits = [trial.suggest_categorical(f"n_{n}", r) for n, r, c in cat_meta]
-            budget = (cfg.n_embd) // 16
+            budget = (cfg.n_embd) // 8
 
             embd = np.array([int(s * budget / sum(splits)) for s in splits])
-            embd[np.argsort(-(np.array(splits) * budget / sum(splits) % 1))[:budget - embd.sum()]] += 1
+            remainders = np.array(splits) * budget / sum(splits) % 1
+            embd[np.argsort(-remainders, kind="stable")[:budget - embd.sum()]] += 1
 
+            print_dim = "embd split:"
             for name, cost, value in zip(names, costs, embd):
-                setattr(cfg, f"n_{name}_embd", int(value * 16 // cost))
+                n_feat_embd = int(value * 8 // cost)
+                print_dim += f" {name}:{n_feat_embd}"
+                setattr(cfg, f"n_{name}_embd", n_feat_embd)
+            logging.info(print_dim)
 
             cfg.dropout = trial.suggest_float("dropout", 0.0, 0.3, step=0.05)
             cfg.attn_dropout = trial.suggest_float("attn_dropout", 0.0, 0.2, step=0.05)
@@ -336,14 +350,17 @@ def run_worker():
     jsonl_path = Path(os.environ.get("OPTUNA_JSONL", f"optuna_{study_name}.jsonl"))
 
     # your paths
-    data_folder = DATA_FOLDER_PATH / "ais/4_features/fh/kiel"
+    data_folder = DATA_FOLDER_PATH / "ais/4_features/fh_10/kiel"
 
     logger(file_prefix=f"optuna_worker_{model_choice}")
     logging.info(study_name)
 
     if False:
+            #"obs_minutes": [1, 5, 10, 15, 20],
         sampler = optuna.samplers.GridSampler({
-            "obs_minutes": [1, 3, 5, 8, 10, 12, 15, 20],
+            "lr":  [1e-4, 5e-4, 1e-3, 3e-3],
+            "weight_decay":  [1e-6, 1e-5, 1e-4],
+            "hidden_size": [256, 512, 1024],
         })
         pruner = optuna.pruners.NopPruner()
     else:
@@ -353,7 +370,7 @@ def run_worker():
         )
 
         pruner = optuna.pruners.PercentilePruner(
-            percentile=10,
+            percentile=75.0,
             n_startup_trials=10,
             n_warmup_steps=8,
         )
@@ -361,7 +378,7 @@ def run_worker():
     study = optuna.create_study(
         study_name=study_name,
         storage=storage,
-        direction="minimize",
+        direction="maximize",
         load_if_exists=True,
         sampler=sampler,
         pruner=pruner,
@@ -370,12 +387,12 @@ def run_worker():
     objective = make_objective(
         model_choice=model_choice,
         data_folder=data_folder,
-        pred_scope = "destination", # "path" "destination"
+        pred_scope = "path", # "path" "destination"
     )
 
     cb = trial_jsonl_callback(jsonl_path)
 
-    study.optimize(objective, n_trials=25, gc_after_trial=True, callbacks=[cb])
+    study.optimize(objective, n_trials=30, gc_after_trial=True, callbacks=[cb])
 
     if study.best_trial is not None:
         logging.info(f"BEST value={study.best_value}")
@@ -385,9 +402,19 @@ if __name__ == "__main__":
     run_worker()
 
 """
-CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///lstm_rel.db" OPTUNA_STUDY="lstm_rel" OPTUNA_JSONL="lstm_rel.jsonl" python -u src/train/train_tune.py
+[Experiment 1] Best observation length for short and long term
+CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///obs_trais_dest_256.db" OPTUNA_STUDY="obs_trais_dest_256" OPTUNA_JSONL="obs_trais_dest_256.jsonl" python -u src/train/train_tune.py
+CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///obs_trais_dest_256.db" OPTUNA_STUDY="obs_trais_dest_256" OPTUNA_JSONL="obs_trais_dest_256.jsonl" python -u src/train/train_tune.py
+CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///obs_lstm.db" OPTUNA_STUDY="obs_lstm" OPTUNA_JSONL="obs_lstm.jsonl" python -u src/train/train_tune.py
 
-CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///path_traisformer.db" OPTUNA_STUDY="path_traisformer" OPTUNA_JSONL="path_traisformer.jsonl" python -u src/train/train_tune.py
+[Experiment 2] LSTM:
+CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///lstm_rel.db" OPTUNA_STUDY="lstm_rel" OPTUNA_JSONL="lstm_rel.jsonl" python -u src/train/train_tune.py
+
+[Experiment 3] TrAISfromer:
+CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///path_traisformer.db" OPTUNA_STUDY="path_traisformer" OPTUNA_JSONL="path_traisformer.jsonl" python -u src/train/train_tune.py
+
+
+CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///path_traisformer.db" OPTUNA_STUDY="path_traisformer" OPTUNA_JSONL="path_traisformer.jsonl" python -u src/train/train_tune.py
 CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///dest_traisformer.db" OPTUNA_STUDY="dest_traisformer" OPTUNA_JSONL="dest_traisformer.jsonl" python -u src/train/train_tune.py
 
 CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///obs_len_lstm_512.db" OPTUNA_STUDY="obs_len_lstm_512" OPTUNA_JSONL="obs_len_lstm_512.jsonl" python -u src/train/train_tune.py

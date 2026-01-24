@@ -116,6 +116,8 @@ def train_single_gpu(
         batch_size=batch_size,
         pin_memory=True,
         feat_cols=feat_cols,
+        pred_len=cfg.pred_len,
+        obs_len=cfg.obs_len,
     )
 
     eval_dset, _, eval_loader = scene_loader(
@@ -128,6 +130,8 @@ def train_single_gpu(
         batch_size=batch_size,
         pin_memory=True,
         feat_cols=feat_cols,
+        pred_len=cfg.pred_len,
+        obs_len=cfg.obs_len,
     )
 
     device = torch.device("cuda:0")
@@ -137,7 +141,7 @@ def train_single_gpu(
 
     if hasattr(model, "rasterizer"):
         print("loading scene layers")
-        path = DATA_FOLDER_PATH / "maps/2_standardized/fh/kiel/" #TODO select scene depending on model
+        path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/" #TODO select scene depending on model
         scene_contiguous = np.ascontiguousarray(process_maps(model.rasterizer, path), dtype=np.float32)
         scene = torch.from_numpy(scene_contiguous).unsqueeze(0).to(device)
     else:
@@ -147,7 +151,7 @@ def train_single_gpu(
     num_batches = 0
     eval_step = 0
     loss_sum = 0.0
-    max_batches = 40_000        # 40_000 bei batchsize 64
+    max_batches = 10_000        # 20_000 bei batchsize 64
     batches_per_eval = 1_000    # 1_000
     
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -201,6 +205,7 @@ def train_single_gpu(
                 num_batches = 0
                 loss_sum = 0.0
 
+                model.eval()
                 with torch.no_grad():
                     metric = eval_fn(
                         eval_step, 
@@ -211,6 +216,7 @@ def train_single_gpu(
                         trial_number=trial.number,
                         config=cfg,
                     )
+
                 model.train()
 
                 metric = float(metric)
@@ -260,10 +266,10 @@ def make_objective(
 
         # --- traisformer params ---
         if (model_choice == "DESIRE"):
-            cfg.hidden_size = trial.suggest_categorical("hidden_size", [32, 48, 64, 80])
-            cfg.out_channels = trial.suggest_categorical("out_channels", [16, 32])
-            cfg.latent_size = trial.suggest_categorical("latent_size", [16, 32, 48])
-            cfg.num_samples = trial.suggest_categorical("num_samples", [1, 2, 3])
+            cfg.hidden_size = trial.suggest_categorical("hidden_size", [256]) #[64, 128, 256, 512])
+            cfg.out_channels = trial.suggest_categorical("out_channels", [16]) #[8, 16, 32])
+            cfg.latent_size = cfg.hidden_size // trial.suggest_categorical("latent_size_factor", [4]) #[8, 4, 2])
+            cfg.num_samples = trial.suggest_categorical("num_samples", [5])
         try:
             metric = train_single_gpu(
                 model_cls=model_cls,
@@ -304,7 +310,7 @@ def run_worker():
     jsonl_path = Path(os.environ.get("OPTUNA_JSONL", f"optuna_{study_name}.jsonl"))
 
     # your paths
-    data_folder = DATA_FOLDER_PATH / "ais/4_features/fh/kiel"
+    data_folder = DATA_FOLDER_PATH / "ais/4_features/fh_10/kiel"
 
     logger(file_prefix=f"optuna_worker_{model_choice}")
     logging.info(study_name)
@@ -315,7 +321,7 @@ def run_worker():
     )
 
     pruner = optuna.pruners.PercentilePruner(
-        percentile=10.0,
+        percentile=75.0,
         n_startup_trials=10,
         n_warmup_steps=8,
     )
@@ -344,11 +350,10 @@ def run_worker():
         logging.info(f"BEST params={study.best_params}")
 
 if __name__ == "__main__":
-    #mp.set_start_method("spawn", force=True)
     run_worker()
 
 """
 
-CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_rel.db" OPTUNA_STUDY="desire_rel" OPTUNA_JSONL="desire_rel.jsonl" python -u src/train/train_tune_desire.py
+CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_rel.db" OPTUNA_STUDY="desire_rel" OPTUNA_JSONL="desire_rel.jsonl" python -u src/train/train_tune_desire.py
 
 """

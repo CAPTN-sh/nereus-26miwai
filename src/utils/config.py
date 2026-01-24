@@ -8,6 +8,11 @@ import yaml
 DATA_FOLDER_PATH = Path("/data/projects/ship_tracker/assets")
 SHIP_DB_PATH = DATA_FOLDER_PATH / "ship_db/ship_db.parquet"
 
+AIS_SOURCE = "fh"
+
+STEP_SIZE = 10
+STEPS_PER_MINUTE = 60 // STEP_SIZE
+
 class Config:
     _instance = None
     _lock = threading.Lock()

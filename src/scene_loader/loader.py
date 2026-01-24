@@ -5,7 +5,6 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from scene_loader.trajectories import SceneTrajectoryDataset, seq_collate
-from functools import partial
 
 
 def scene_loader(
@@ -18,6 +17,8 @@ def scene_loader(
     batch_size: int,
     feat_cols=[],
     pin_memory=True,
+    pred_len=120,
+    obs_len=60,
 ):
 
     file_name = f"{data_folder.parent.name}_{data_folder.name}_{flag}"
@@ -28,6 +29,8 @@ def scene_loader(
         min_date=min_date,
         max_date=max_date,
         feat_cols=feat_cols,
+        pred_len=pred_len,
+        obs_len=obs_len,
     )
 
     sampler = DistributedSampler(

@@ -104,10 +104,10 @@ class SceneTrajectoryDataset(Dataset):
         min_date: pd.Timestamp,
         max_date: pd.Timestamp,
         feat_cols=[],
-        obs_len=144,
-        pred_len=36,
+        obs_len=120,
+        pred_len=60,
         min_valid_window=12,
-        force_rebuild=False
+        force_rebuild=True
     ):
         super(SceneTrajectoryDataset, self).__init__()
         self.obs_len = obs_len
@@ -140,6 +140,9 @@ class SceneTrajectoryDataset(Dataset):
             self.feat = np.memmap(feat_path, dtype="float32", mode="r", shape=meta["feat_shape"])
             self.pos = np.memmap(pos_path, dtype="float32", mode="r", shape=meta["pos_shape"])
             self.pos_rel = np.memmap(pos_rel_path, dtype="float32", mode="r", shape=meta["pos_rel_shape"])
+
+            max_ships_per_scene = max(len(traj_ids) for _, traj_ids, _ in self.items)
+            print("max_ships_per_scene:", max_ships_per_scene)
             return
         
         print(f"Cache not found: {cache_dir}")
@@ -183,10 +186,15 @@ class SceneTrajectoryDataset(Dataset):
         nodes["n_from_start"] = traj_g.cumcount()
         nodes["n_to_end"] = traj_g.transform("size") - 1 - nodes["n_from_start"]
         
+        max_ships_per_scene = 0
         for cur_t, nodes_t in tqdm(nodes.groupby(level=0)):
             agent_mask = (nodes_t["n_from_start"] >= self.min_valid_window) & (nodes_t["n_to_end"] >= self.min_valid_window)
-            if agent_mask.any():
-                self.items.append((cur_t, list(nodes_t["traj_id"]), agent_mask.to_numpy()))
+            valid_traj_ids = nodes_t.loc[agent_mask, "traj_id"].tolist()
+            if len(valid_traj_ids) > 0:
+                self.items.append((cur_t, valid_traj_ids))
+                max_ships_per_scene = max(max_ships_per_scene, len(valid_traj_ids))
+        
+        print("max_ships_per_scene:", max_ships_per_scene)
 
         for idx, (traj_id, df) in enumerate(tqdm(nodes.groupby("traj_id"))):
             self.traj_id_to_idx[traj_id] = idx
@@ -237,7 +245,7 @@ class SceneTrajectoryDataset(Dataset):
         return len(self.items)
 
     def __getitem__(self, index):
-        cur_t, traj_ids, agent_mask = self.items[index]
+        cur_t, traj_ids = self.items[index]
 
         obs_feat = []
         obs_pos = []
@@ -278,9 +286,6 @@ class SceneTrajectoryDataset(Dataset):
         fut_pos = self._to_tensor(fut_pos)
         fut_pos_rel = self._to_tensor(fut_pos_rel)
         fut_mask= self._to_tensor(fut_mask, dtype=torch.bool)
-        agent_mask = torch.as_tensor(agent_mask, dtype=torch.bool)
-
-        fut_mask &= agent_mask[:, None, None]
 
         return obs_feat, obs_pos, obs_pos_rel, obs_mask, fut_pos, fut_pos_rel, fut_mask
 

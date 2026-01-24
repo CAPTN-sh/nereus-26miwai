@@ -1,5 +1,4 @@
 import torch.nn as nn
-import torch
 
 from models.desire.IOC import IOC
 from models.desire.nn.scene_pooling import ScenePoolingCNN
@@ -18,7 +17,7 @@ class DESIRE(nn.Module):
         self.IOC = IOC(params)
 
         # TODO config
-        self.rasterizer = Rasterizer([10.12, 54.31, 10.33, 54.46])
+        self.rasterizer = Rasterizer([10.12, 54.31, 10.33, 54.46], pos_res = 10)
 
     def forward(self, batch, scene):
         obs_feat, obs_pos, obs_pos_rel, obs_mask, fut_pos, fut_pos_rel, fut_mask, seq_start_end = batch

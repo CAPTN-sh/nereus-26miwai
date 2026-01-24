@@ -5,7 +5,7 @@ from scene_loader.loader import SceneTrajectoryDataset
 from utils.config import DATA_FOLDER_PATH
 
 feat_cols = ["speed", "course", "acc", "angular_difference", "length", "width", "ship_group"]
-data_folder = DATA_FOLDER_PATH / "ais/4_features/fh/kiel"
+data_folder = DATA_FOLDER_PATH / "ais/4_features/fh_10/kiel"
 for l in ["val", "train"]: # "train", 
     file_name = f"{data_folder.parent.name}_{data_folder.name}_{l}"
     dset = SceneTrajectoryDataset(

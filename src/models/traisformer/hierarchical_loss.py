@@ -42,29 +42,24 @@ def loss_intent_heatmap(
     # 5. Wissenschaftliche Metriken (ohne Gradientenberechnung)
     with torch.no_grad():
         # --- Hit Rates ---
-        _, top5_indices = torch.topk(logits.view(B, -1), k=5, dim=1)
+        _, top5_indices = torch.topk(probs_fine, k=5, dim=1)
         hit1 = (top5_indices[:, 0] == target_indices).float().mean()
         hit5 = (top5_indices == target_indices.unsqueeze(1)).any(dim=1).float().mean()
 
         # --- Mean Target Probability (MTP) ---
-        # Wie viel Vertrauen (0.0-1.0) gibt das Modell dem echten Ziel-Pixel?
         target_probs = probs_fine.gather(1, target_indices.unsqueeze(1))
         mean_target_prob = target_probs.mean()
 
-        # --- Mean Distance Error (MDE) ---
-        # Wir extrahieren die x,y Koordinaten aus den flachen Indizes
-        # Wichtig: y_idx ist der Rest der Division durch die Breite (W)
-        top1_idx = top5_indices[:, 0]
-        
-        pred_x, pred_y = top1_idx // W, top1_idx % W
+        # --- Min Distance Error @ K (MinDE@K) ---
+        pred_x, pred_y = top5_indices // W, top5_indices % W
         gt_x, gt_y = target_indices // W, target_indices % W
         
-        # Euklidischer Abstand in Pixeln: d = sqrt((x1-x2)^2 + (y1-y2)^2)
-        dist_px = torch.sqrt((pred_x - gt_x)**2 + (pred_y - gt_y)**2).float()
+        dist_px = torch.sqrt((pred_x - gt_x.unsqueeze(1))**2 + (pred_y - gt_y.unsqueeze(1))**2).float()
+
+        min_dist_px = dist_px.min(dim=1)[0]
         
         # Umrechnung in Meter (basierend auf deiner Raster-Auflösung, z.B. 50m)
-        res = float(RASTER.pos_res)
-        mde_meters = dist_px.mean() * res
+        min_dist_5_meters  = min_dist_px.mean() * float(RASTER.pos_res)
 
     # 6. Gesamt-Loss
     total_loss = ce_fine + config.coarse_loss_beta * ce_coarse
@@ -72,9 +67,9 @@ def loss_intent_heatmap(
     return total_loss, {
         "ce_fine": ce_fine, 
         "ce_coarse": ce_coarse,
+        "min_dist_5_meters": min_dist_5_meters,
         "hit1": hit1,
         "hit5": hit5,
-        "mde_meters": mde_meters,
         "mean_target_prob": mean_target_prob
     }
 
@@ -128,14 +123,12 @@ def loss_occupancy_heatmap(
 
     # 5. Thesis Metrics (Probability Allocation)
     with torch.no_grad():
-        # Precision: Total probability mass assigned to occupied pixels
-        # sum(probs_fine[target_fine == 1])
-        precision = torch.sum(probs_fine * (target_flat > 0), dim=1).mean()
+        # Probability Mass Coverage / path coverage
+        pmc = torch.sum(probs_fine * (target_flat > 0), dim=1).mean()
         
-        # Recall: 1 - sum(max(0, target_norm - probs_fine))
-        # We use target_norm because it has a total mass of 1.0, matching probs_fine
+        # Distribution Overlap
         missed_mass = torch.sum(torch.clamp(target_flat - probs_fine, min=0), dim=1)
-        recall = (1.0 - missed_mass).mean()
+        overlap = (1.0 - missed_mass).mean()
 
     # 6. Total Loss
     total_loss = ce_fine + config.coarse_loss_beta * ce_coarse
@@ -143,8 +136,8 @@ def loss_occupancy_heatmap(
     return total_loss, {
         "ce_fine": ce_fine,
         "ce_coarse": ce_coarse,
-        "precision": precision, # Probability Mass Coverage
-        "recall": recall       # Distribution Overlap
+        "pmc": pmc,
+        "overlap": overlap,
     }
 
 def rasterize_occupancy(fut_pos, fut_mask):
