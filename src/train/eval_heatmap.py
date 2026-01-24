@@ -33,15 +33,11 @@ def eval_heatmap(
 
     num_batches = 0
     loss_sum = 0.0
-    ce_fine_sum = 0.0
-    ce_coarse_sum = 0.0
-    
-    # Neue Metriken Akkumulatoren
+    nll_gt_sum = 0.0
 
+    p_gt_sum = 0.0
     hit1_sum = 0.0
     hit5_sum = 0.0
-    min_dist_5_sum = 0.0
-    target_prob_sum = 0.0
 
     pmc_sum = 0.0
     overlap_sum = 0.0
@@ -65,15 +61,13 @@ def eval_heatmap(
                 overlap_sum += float(loss_dict["overlap"])
             if config.pred_scope == "destination":
                 loss, loss_dict = loss_intent_heatmap(output, batch, config=config)
+                p_gt_sum += float(loss_dict["p_gt"])
                 hit1_sum += float(loss_dict["hit1"])
                 hit5_sum += float(loss_dict["hit5"])
-                min_dist_5_sum += float(loss_dict["min_dist_5_meters"])
-                target_prob_sum += float(loss_dict["mean_target_prob"])
 
             # Summiere alle Werte auf
             loss_sum += float(loss.item())
-            ce_fine_sum += float(loss_dict["ce_fine"])
-            ce_coarse_sum += float(loss_dict["ce_coarse"])
+            nll_gt_sum += float(loss_dict["nll_gt"])
             
             num_batches += 1
 
@@ -99,23 +93,19 @@ def eval_heatmap(
                         t_hmap = target.view(B, x_bins, y_bins)[i].detach().cpu().numpy()
                         plot_heatmap(f"target_heatmap_{config.pred_scope[:4]}_{i}", t_hmap)
 
-    # Durchschnittsberechnung
-    loss_avg = loss_sum / num_batches
-    ce_fine_avg = ce_fine_sum / num_batches
-    ce_coarse_avg = ce_coarse_sum / num_batches
+    nll_gt_avg = nll_gt_sum / num_batches
     
     if config.pred_scope == "path":
         pmc_avg = pmc_sum / num_batches
         overlap_avg = overlap_sum / num_batches
-        logging.info(f"[Eval HeatMap] Epoch {epoch} - Loss Total: {loss_avg:.6f} ce_fine: {ce_fine_avg:.4f}, ce_coarse: {ce_coarse_avg:.4f}, pmc_avg: {pmc_avg:.2%}, overlap_avg: {overlap_avg:.2%}")
+        logging.info(f"[Eval HeatMap] Epoch {epoch} - nll_gt: {nll_gt_avg:.6f}, pmc: {pmc_avg:.2%}, overlap: {overlap_avg:.2%}")
     
-        return pmc_avg
+        return nll_gt_avg
     
     if config.pred_scope == "destination":
         hit1_avg = hit1_sum / num_batches
         hit5_avg = hit5_sum / num_batches
-        min_dist_5_avg = min_dist_5_sum / num_batches
-        target_prob_avg = target_prob_sum / num_batches
-        logging.info(f"[Eval HeatMap] Epoch {epoch} - Loss Total: {loss_avg:.6f} ce_fine: {ce_fine_avg:.4f}, ce_coarse: {ce_coarse_avg:.4f}, hit@1: {hit1_avg:.2%}, hit@5: {hit5_avg:.2%}, minDE: {min_dist_5_avg:.2f}m, TProb: {target_prob_avg:.2%}")
+        p_gt_avg = p_gt_sum / num_batches
+        logging.info(f"[Eval HeatMap] Epoch {epoch} - nll_gt: {nll_gt_avg:.6f}, p_gt: {p_gt_avg:.2%}, hit@1: {hit1_avg:.2%}, hit@5: {hit5_avg:.2%}")
         
-        return min_dist_5_avg
+        return nll_gt_avg

@@ -25,13 +25,13 @@ def loss_intent_heatmap(
     target_fine_flat = target_fine.view(B, -1)
     
     # Wo liegt das Schiff wirklich? (Index des Pixels)
-    target_indices = torch.argmax(target_fine_flat, dim=1) 
+    target_indices = torch.argmax(target_fine_flat, dim=1)
 
     # 3. Fine-Resolution Loss
     ce_fine = torch.sum(-target_fine_flat * log_probs_fine, dim=1).mean()
 
     # 4. Multi-Resolution / Coarse Loss (10x10 Pooling)
-    pool_size = 10
+    pool_size = config.coarse_loss_pool_size
     # Wir bringen probs_fine zurück in 2D für das Pooling
     probs_fine_2d = probs_fine.view(B, 1, H, W)
     probs_coarse = F.avg_pool2d(probs_fine_2d, kernel_size=pool_size) * (pool_size**2)
@@ -42,35 +42,27 @@ def loss_intent_heatmap(
     # 5. Wissenschaftliche Metriken (ohne Gradientenberechnung)
     with torch.no_grad():
         # --- Hit Rates ---
+
+        top1_indices = torch.argmax(probs_fine, dim=1)
+        hit1 = (top1_indices == target_indices).float().mean()
+
         _, top5_indices = torch.topk(probs_fine, k=5, dim=1)
-        hit1 = (top5_indices[:, 0] == target_indices).float().mean()
         hit5 = (top5_indices == target_indices.unsqueeze(1)).any(dim=1).float().mean()
 
         # --- Mean Target Probability (MTP) ---
         target_probs = probs_fine.gather(1, target_indices.unsqueeze(1))
-        mean_target_prob = target_probs.mean()
-
-        # --- Min Distance Error @ K (MinDE@K) ---
-        pred_x, pred_y = top5_indices // W, top5_indices % W
-        gt_x, gt_y = target_indices // W, target_indices % W
         
-        dist_px = torch.sqrt((pred_x - gt_x.unsqueeze(1))**2 + (pred_y - gt_y.unsqueeze(1))**2).float()
-
-        min_dist_px = dist_px.min(dim=1)[0]
-        
-        # Umrechnung in Meter (basierend auf deiner Raster-Auflösung, z.B. 50m)
-        min_dist_5_meters  = min_dist_px.mean() * float(RASTER.pos_res)
+        nll_gt = -(target_probs + 1e-8).log().mean()
+        p_gt = target_probs.mean()
 
     # 6. Gesamt-Loss
-    total_loss = ce_fine + config.coarse_loss_beta * ce_coarse
+    loss = ce_fine + config.coarse_loss_beta * ce_coarse
 
-    return total_loss, {
-        "ce_fine": ce_fine, 
-        "ce_coarse": ce_coarse,
-        "min_dist_5_meters": min_dist_5_meters,
+    return loss, {
+        "nll_gt": nll_gt,
+        "p_gt": p_gt,
         "hit1": hit1,
         "hit5": hit5,
-        "mean_target_prob": mean_target_prob
     }
 
 def rasterize_destination(fin_pos):
@@ -108,8 +100,8 @@ def loss_occupancy_heatmap(
     # 3. Fine-Resolution Loss (Categorical Cross Entropy)
     ce_fine = torch.sum(-target_flat * log_probs_fine, dim=1).mean()
 
-    # 4. Multi-Resolution / Coarse Loss (10x10 Pooling)
-    pool_size = 10
+    # 4. Multi-Resolution / Coarse Loss (3x3 Pooling)
+    pool_size = config.coarse_loss_pool_size
     probs_fine_2d = probs_fine.view(B, 1, H, W)
     # Average pooling * pool_size^2 keeps the sum of the map at 1.0
     probs_coarse = F.avg_pool2d(probs_fine_2d, kernel_size=pool_size) * (pool_size**2)
@@ -124,18 +116,18 @@ def loss_occupancy_heatmap(
     # 5. Thesis Metrics (Probability Allocation)
     with torch.no_grad():
         # Probability Mass Coverage / path coverage
-        pmc = torch.sum(probs_fine * (target_flat > 0), dim=1).mean()
+        p_gt = torch.sum(probs_fine * (target_flat > 0), dim=1)
+        pmc = p_gt.mean()
+        nll_gt = -(p_gt + 1e-8).log().mean()
         
         # Distribution Overlap
-        missed_mass = torch.sum(torch.clamp(target_flat - probs_fine, min=0), dim=1)
-        overlap = (1.0 - missed_mass).mean()
+        overlap = torch.sum(torch.min(target_flat, probs_fine), dim=1).mean()
 
     # 6. Total Loss
-    total_loss = ce_fine + config.coarse_loss_beta * ce_coarse
+    loss = ce_fine + config.coarse_loss_beta * ce_coarse
 
-    return total_loss, {
-        "ce_fine": ce_fine,
-        "ce_coarse": ce_coarse,
+    return loss, {
+        "nll_gt": nll_gt,
         "pmc": pmc,
         "overlap": overlap,
     }

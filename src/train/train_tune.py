@@ -279,17 +279,12 @@ def make_objective(
             if pred_scope == "path":
                 cfg.pred_len = 20 * STEPS_PER_MINUTE
 
-            cfg.n_layer = trial.suggest_int("n_layer", 2, 8, step=2)
+            cfg.n_layer = trial.suggest_int("n_layer", 4, 8, step=2)
             cfg.n_head = trial.suggest_categorical("n_head", [4, 8])
-            head_dim = trial.suggest_categorical("head_dim", [32, 64, 128])
-            cfg.n_embd = cfg.n_head * head_dim
+            cfg.n_embd = trial.suggest_categorical("n_embd", [256, 512, 1024])
 
-            cat_meta = [("spatial", [4], 2), ("kinematic", [0,1,2,4], 2)]
-            cat_meta += [("dynamic", [0,1,2,4], 2), ("terrain", [0,1,2,4], 1), ("vessel", [0,1,2,4], 1)]
-
-            # fixed split
             cat_meta = [("spatial", [4], 2), ("kinematic", [2], 2)]
-            cat_meta += [("dynamic", [1], 2), ("terrain", [1], 1), ("vessel", [1], 1)]
+            cat_meta += [("dynamic", [0,1,2], 2), ("terrain", [0,1,2], 1), ("vessel", [0,1,2], 1)]
 
             names, _, costs = zip(*cat_meta)
             splits = [trial.suggest_categorical(f"n_{n}", r) for n, r, c in cat_meta]
@@ -301,15 +296,14 @@ def make_objective(
 
             print_dim = "embd split:"
             for name, cost, value in zip(names, costs, embd):
-                n_feat_embd = int(value * 8 // cost)
-                print_dim += f" {name}:{n_feat_embd}"
-                setattr(cfg, f"n_{name}_embd", n_feat_embd)
+                print_dim += f" {name}:{value * 8}"
+                setattr(cfg, f"n_{name}_embd", int(value * 8 // cost))
             logging.info(print_dim)
 
             cfg.dropout = trial.suggest_float("dropout", 0.0, 0.3, step=0.05)
             cfg.attn_dropout = trial.suggest_float("attn_dropout", 0.0, 0.2, step=0.05)
 
-            cfg.coarse_loss_beta = trial.suggest_categorical("coarse_loss_beta", [0.0, 0.5, 1.0, 2.0])
+            cfg.coarse_loss_beta = trial.suggest_categorical("coarse_loss_beta", [0.0, 0.5, 1.0])
         try:
             metric = train_single_gpu(
                 model_cls=model_cls,
@@ -378,7 +372,7 @@ def run_worker():
     study = optuna.create_study(
         study_name=study_name,
         storage=storage,
-        direction="maximize",
+        direction="minimize",
         load_if_exists=True,
         sampler=sampler,
         pruner=pruner,

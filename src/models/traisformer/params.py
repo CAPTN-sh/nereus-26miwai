@@ -36,3 +36,4 @@ class TraisformerParams:
 
     # loss
     coarse_loss_beta: float = 1
+    coarse_loss_pool_size: int = 3
