@@ -46,7 +46,6 @@ class TrajectoryHeatmapDataset(Dataset):
 
         min_valid_window = min_len_in_minutes * STEPS_PER_MINUTE
 
-        feat_cols = feat_cols.copy()
         self.items = []
         self.feat_map = {}
         self.pos_map = {}
@@ -70,25 +69,30 @@ class TrajectoryHeatmapDataset(Dataset):
         nodes = nodes.reset_index().merge(ship_db, on="mmsi")
         nodes = cords_to_meters(nodes)
 
+        feat_cols = ["speed", "course", "acc", "angular_difference", "length",  "width",  "sailing", "cargo", "passenger", "hour_of_day"]
+
+        def norm_deg(col):
+            rad = np.deg2rad(nodes[col])
+            nodes[col + "_sin"] = np.sin(rad)
+            nodes[col + "_cos"] = np.cos(rad)
+            feat_cols.append(col + "_sin")
+            feat_cols.append(col + "_cos")
+            feat_cols.remove(col)
+
         nodes["length"] = np.log1p(nodes['to_bow'] + nodes['to_stern']) / np.log1p(400)
         nodes["width"] = np.log1p(nodes['to_port'] + nodes['to_starboard']) / np.log1p(60)
         nodes["sailing"] = nodes["ship_group"] == "sailing"
         nodes["cargo"] = nodes["ship_group"] == "cargo"
         nodes["passenger"] = nodes["ship_group"] == "passenger"
+        nodes["hour_of_day"] = nodes["timestamp"].dt.hour / 24 * 360
 
-        feat_cols += ["acc", "angular_difference", "length",  "width",  "sailing", "cargo", "passenger"]
+        norm_deg('hour_of_day')
 
         if normalize:
             nodes["speed"] = nodes["speed"] / 40
             nodes["acc"] = nodes["acc"] / 4
-
-            for col in ['course', 'angular_difference']:
-                rad = np.deg2rad(nodes[col])
-                nodes[col + "_sin"] = np.sin(rad)
-                nodes[col + "_cos"] = np.cos(rad)
-                feat_cols += [col + "_sin", col + "_cos"]
-                feat_cols.remove(col)
-
+            norm_deg('course')
+            norm_deg('angular_difference')
 
         for traj_id, group in tqdm(nodes.groupby("traj_id")):
             group = group.sort_values("time").reset_index(drop=True)

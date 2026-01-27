@@ -21,7 +21,7 @@ from models.traisformer.loss import loss_intent_heatmap2
 from models.traisformer.model import TrAISformer
 from models.traisformer.params import TraisformerParams
 from train.eval_heatmap import eval_heatmap
-from scene_loader.loader import scene_loader
+from loaders.scene_loader.loader import scene_loader
 from train.eval import eval, eval_loss
 from utils.logger import logger
 from models.utils.maps.scene_gernerator import process_maps

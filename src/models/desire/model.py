@@ -12,12 +12,13 @@ class DESIRE(nn.Module):
         self.pred_len = params.pred_len
         self.num_refine_iters = params.num_refine_iters
 
-        self.CNN = ScenePoolingCNN(params)
-        self.SGM = SGM(params)
-        self.IOC = IOC(params)
-
         # TODO config
         self.rasterizer = Rasterizer([10.12, 54.31, 10.33, 54.46], pos_res = 10)
+
+        self.CNN = ScenePoolingCNN(params)
+        self.SGM = SGM(params)
+        self.IOC = IOC(params, self.rasterizer)
+        
 
     def forward(self, batch, scene):
         obs_feat, obs_pos, obs_pos_rel, obs_mask, fut_pos, fut_pos_rel, fut_mask, seq_start_end = batch
@@ -28,14 +29,8 @@ class DESIRE(nn.Module):
         pred_pos_rel, hidde_obs_enc, mean, log_var = self.SGM(obs_feat, obs_pos_rel, obs_mask, fut_pos_rel, fut_mask)
 
         # IOC: scores + per-step Δ for each hypothesis
-        pred_pos_rel_best, pred_pos_rel_refined, scores = self.IOD_iteration(
-            self.num_refine_iters,
-            pred_pos_rel,
-            hidde_obs_enc,
-            obs_pos_last,
-            seq_start_end,
-            scene_feats
-        )
+        iod_params = (pred_pos_rel, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats)
+        pred_pos_rel_best, pred_pos_rel_refined, scores = self.IOD_iteration(*iod_params)
 
         return pred_pos_rel_best, pred_pos_rel, pred_pos_rel_refined, mean, log_var, scores
 
@@ -49,46 +44,20 @@ class DESIRE(nn.Module):
         pred_pos_rel, hidde_obs_enc, mean, log_var = self.SGM.inference(obs_feat, obs_pos_rel, obs_mask)
         
         # IOC: scores + per-step Δ for each hypothesis
-        pred_pos_rel_best, pred_pos_rel_refined, scores = self.IOD_iteration(
-            self.num_refine_iters, 
-            pred_pos_rel, 
-            hidde_obs_enc, 
-            obs_pos_last, 
-            seq_start_end, 
-            scene_feats,
-        )
+        iod_params = (pred_pos_rel, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats)
+        pred_pos_rel_best, pred_pos_rel_refined, scores = self.IOD_iteration(*iod_params)
 
         return pred_pos_rel_best, pred_pos_rel_refined
     
-    def IOD_iteration(self, num_refine_iters, pred_pos_rel, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats):
-        scores, delta = self.IOC(
-            pred_pos_rel, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats, self.rasterizer
-        )
-        pred_pos_rel_refined = pred_pos_rel + delta
+    def IOD_iteration(self, pred_pos_rel, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats):
 
-        for _ in range(num_refine_iters):
-            scores, delta = self.IOC(
-                pred_pos_rel_refined,
-                hidde_obs_enc,
-                obs_pos_last,
-                seq_start_end,
-                scene_feats,
-                self.rasterizer,
-            )
-            pred_pos_rel_refined = pred_pos_rel_refined + delta
+        Y = pred_pos_rel
+        for _ in range(self.num_refine_iters):
+            _, delta = self.IOC(Y, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats)
+            Y = Y + delta
+        scores, _ = self.IOC(Y, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats)
 
-        scores, _ = self.IOC(
-            pred_pos_rel_refined,
-            hidde_obs_enc,
-            obs_pos_last,
-            seq_start_end,
-            scene_feats,
-            self.rasterizer,
-        )
+        best_idx = scores.argmax(dim=1).view(-1, 1, 1, 1).expand(-1, 1, 2, self.pred_len)
+        pred_pos_rel_best = Y.gather(1, best_idx).squeeze(1)
 
-        best_idx = scores.argmax(dim=1)
-        pred_pos_rel_best = pred_pos_rel_refined.gather(
-            1, best_idx.view(-1, 1, 1, 1).expand(-1, 1, 2, self.pred_len)
-        ).squeeze(1)
-
-        return pred_pos_rel_best, pred_pos_rel_refined, scores
+        return pred_pos_rel_best, Y, scores

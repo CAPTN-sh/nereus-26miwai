@@ -21,7 +21,7 @@ from models.traisformer.hierarchical_loss import loss_intent_heatmap, loss_occup
 from models.traisformer.model import TrAISformer
 from models.traisformer.params import TraisformerParams
 from train.eval_heatmap import eval_heatmap
-from loader_heatmap.loader import loader_heatmap
+from loaders.heatmap_loader.loader import loader_heatmap
 from train.eval import eval, eval_loss
 from utils.logger import logger
 from train.early_stopper import EarlyStopper
@@ -107,7 +107,7 @@ def train_single_gpu(
     trial_settings = {k: round(v, 6) if isinstance(v, float) else v for k, v in trial.params.items()}
     logging.info(f"[Trial {trial.number}] {trial_settings}")
 
-    feat_cols = ["speed", "course"] #, "acc", "angular_difference", "length", "width", "ship_group"]
+    feat_cols = ["speed", "course"]
     train_dset, _, train_loader = loader_heatmap(
         data_folder=data_folder,
         flag="train",
@@ -281,30 +281,20 @@ def make_objective(
 
             cfg.n_layer = trial.suggest_categorical("n_layer", [4, 6])
             cfg.n_head = trial.suggest_categorical("n_head", [4, 8])
-            cfg.n_embd = trial.suggest_categorical("n_embd", [256, 512])
+            cfg.n_embd = trial.suggest_categorical("n_embd", [128, 256, 512])
             
             cfg.dropout = trial.suggest_float("dropout", 0.0, 0.3, step=0.05)
             cfg.attn_dropout = trial.suggest_float("attn_dropout", 0.0, 0.2, step=0.05)
 
-            cfg.coarse_loss_beta = trial.suggest_categorical("coarse_loss_beta", [0.0, 0.5, 1.0])
+            cfg.coarse_loss_beta = trial.suggest_categorical("coarse_loss_beta", [0.0, 0.5, 1.0, 2])
 
-            cat_meta = [("spatial", [4], 2), ("kinematic", [2], 2)]
-            # cat_meta += [("dynamic", [0,1,2], 2), ("terrain", [0,1,2], 1), ("vessel", [0,1,2], 1)]
-            cat_meta += [("dynamic", [1], 2), ("terrain", [1], 1), ("vessel", [1], 1)]
+            cfg.n_spatial_embd = cfg.n_embd // 4
+            cfg.n_kinematic_embd = cfg.n_embd // 8
+            cfg.n_dynamic_embd = cfg.n_embd // 8
 
-            names, _, costs = zip(*cat_meta)
-            splits = [trial.suggest_categorical(f"n_{n}", r) for n, r, c in cat_meta]
-            budget = (cfg.n_embd) // 8
+            cfg.n_terrain_embd = cfg.n_embd // 4
+            cfg.n_vessel_embd = cfg.n_embd // 8
 
-            embd = np.array([int(s * budget / sum(splits)) for s in splits])
-            remainders = np.array(splits) * budget / sum(splits) % 1
-            embd[np.argsort(-remainders, kind="stable")[:budget - embd.sum()]] += 1
-
-            print_dim = "embd split:"
-            for name, cost, value in zip(names, costs, embd):
-                print_dim += f" {name}:{value * 8}"
-                setattr(cfg, f"n_{name}_embd", int(value * 8 // cost))
-            logging.info(print_dim)
         try:
             metric = train_single_gpu(
                 model_cls=model_cls,
@@ -382,12 +372,12 @@ def run_worker():
     objective = make_objective(
         model_choice=model_choice,
         data_folder=data_folder,
-        pred_scope = "path", # "path" "destination"
+        pred_scope = "destination", # "path" "destination"
     )
 
     cb = trial_jsonl_callback(jsonl_path)
 
-    study.optimize(objective, n_trials=30, gc_after_trial=True, callbacks=[cb])
+    study.optimize(objective, n_trials=10, gc_after_trial=True, callbacks=[cb])
 
     if study.best_trial is not None:
         logging.info(f"BEST value={study.best_value}")
@@ -403,7 +393,7 @@ CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///obs_tr
 CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///obs_lstm.db" OPTUNA_STUDY="obs_lstm" OPTUNA_JSONL="obs_lstm.jsonl" python -u src/train/train_tune.py
 
 [Experiment 2] LSTM:
-CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///lstm_rel.db" OPTUNA_STUDY="lstm_rel" OPTUNA_JSONL="lstm_rel.jsonl" python -u src/train/train_tune.py
+CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///lstm_rel.db" OPTUNA_STUDY="lstm_rel" OPTUNA_JSONL="lstm_rel.jsonl" python -u src/train/train_tune.py
 
 [Experiment 3] TrAISfromer:
 CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///dest_trais_base.db" OPTUNA_STUDY="dest_trais_base" OPTUNA_JSONL="dest_trais_base.jsonl" python -u src/train/train_tune.py

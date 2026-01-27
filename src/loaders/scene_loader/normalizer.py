@@ -7,9 +7,11 @@ MINMAX = {
     'length': (0, 400, 1), 
     'width': (0, 60, 1),
 }
-DEG_COS = set(['course', 'angular_difference']) #, 'rel_bearing', 'course_diff'])
+DEG_COS = set(['course', 'angular_difference', 'hour_of_day']) #, 'rel_bearing', 'course_diff'])
 
 def normalize(nodes: pd.DataFrame, feature_cols) -> pd.DataFrame:
+    if 'hour_of_day' in feature_cols:
+        nodes["hour_of_day"] / 24 * 360
 
     norm_deg_cols = DEG_COS & set(feature_cols)
     print("normalizing:",  norm_deg_cols)

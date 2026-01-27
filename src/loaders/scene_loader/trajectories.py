@@ -8,9 +8,9 @@ import pyproj
 import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
-from scene_loader.normalizer import normalize
+from loaders.scene_loader.normalizer import normalize
 
-from utils.config import SHIP_DB_PATH
+from utils.config import SHIP_DB_PATH, STEPS_PER_MINUTE, STEP_SIZE
 
 def seq_collate(data):
     (
@@ -51,22 +51,13 @@ def seq_collate(data):
     )
 
 
-def get_interp_step_size(df: pd.DataFrame):
-    first_traj = df.loc[df["traj_id"] == df.iloc[0]["traj_id"]].copy()
-    ts = first_traj.sort_values("timestamp")["timestamp"]
-    step_size = int((ts.iloc[1] - ts.iloc[0]).total_seconds())
-    return step_size
-
-
-def process_time(
-    df: pd.DataFrame, min_date: pd.Timestamp, max_date: pd.Timestamp, step_size: int
-) -> pd.DataFrame:
+def process_time(df: pd.DataFrame, min_date: pd.Timestamp, max_date: pd.Timestamp) -> pd.DataFrame:
     df = (
         df[df["timestamp"].between(min_date, max_date + timedelta(days=1))]
         .copy()
         .reset_index(drop=True)
     )
-    df["time"] = df["timestamp"].astype("datetime64[s]").astype("int64") // step_size
+    df["time"] = df["timestamp"].astype("datetime64[s]").astype("int64") // STEP_SIZE
     df = df.set_index("time").sort_index()
     return df
 
@@ -104,15 +95,15 @@ class SceneTrajectoryDataset(Dataset):
         min_date: pd.Timestamp,
         max_date: pd.Timestamp,
         feat_cols=[],
-        obs_len=120,
-        pred_len=60,
-        min_valid_window=12,
-        force_rebuild=True
+        obs_len=60,
+        pred_len=30,
+        min_len_in_minutes=1,
+        force_rebuild=False
     ):
         super(SceneTrajectoryDataset, self).__init__()
         self.obs_len = obs_len
         self.pred_len = pred_len
-        self.min_valid_window = min_valid_window
+        self.min_valid_window = min_len_in_minutes * STEPS_PER_MINUTE
 
         self.l_pad = obs_len
         self.r_pad = pred_len
@@ -140,9 +131,8 @@ class SceneTrajectoryDataset(Dataset):
             self.feat = np.memmap(feat_path, dtype="float32", mode="r", shape=meta["feat_shape"])
             self.pos = np.memmap(pos_path, dtype="float32", mode="r", shape=meta["pos_shape"])
             self.pos_rel = np.memmap(pos_rel_path, dtype="float32", mode="r", shape=meta["pos_rel_shape"])
-
-            max_ships_per_scene = max(len(traj_ids) for _, traj_ids, _ in self.items)
-            print("max_ships_per_scene:", max_ships_per_scene)
+            
+            self.items = [(cur_t, traj_ids) for (cur_t, traj_ids) in self.items if len(traj_ids) <= 100]
             return
         
         print(f"Cache not found: {cache_dir}")
@@ -159,8 +149,7 @@ class SceneTrajectoryDataset(Dataset):
         self.feature_cols = feat_cols.copy()
 
         nodes = pd.read_parquet(nodes_path)
-        step_size = get_interp_step_size(nodes)
-        nodes = process_time(nodes, min_date, max_date, step_size)
+        nodes = process_time(nodes, min_date, max_date)
 
         if nodes.empty:
             raise ValueError("There are no values within the given time range.")
@@ -174,6 +163,8 @@ class SceneTrajectoryDataset(Dataset):
         nodes = nodes.set_index("time").sort_index()
 
         # add features
+        nodes["hour_of_day"] = nodes["timestamp"].dt.hour
+        
         nodes["length"] = nodes['to_bow'] + nodes['to_stern']
         nodes["width"] = nodes['to_port'] + nodes['to_starboard']
 
@@ -275,8 +266,8 @@ class SceneTrajectoryDataset(Dataset):
             fut_pos.append(abs_pos[cur_idx : cur_idx + self.pred_len])
             fut_pos_rel.append(rel_pos[cur_idx : cur_idx + self.pred_len])
 
-            obs_mask.append((torch.arange(cur_idx - self.obs_len, cur_idx) >= self.l_pad).unsqueeze(-1))
-            fut_mask.append((torch.arange(cur_idx, cur_idx + self.pred_len) < (len(abs_pos) - self.r_pad)).unsqueeze(-1))
+            obs_mask.append((np.arange(cur_idx - self.obs_len, cur_idx) >= self.l_pad)[:, None])
+            fut_mask.append((np.arange(cur_idx, cur_idx + self.pred_len) < (len(abs_pos) - self.r_pad))[:, None])
         
         # Now all lists have consistent shapes: [N, obs_len/pred_len, C]
         obs_feat = self._to_tensor(obs_feat)

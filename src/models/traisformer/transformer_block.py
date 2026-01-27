@@ -30,14 +30,14 @@ class Block(nn.Module):
             nn.Dropout(config.attn_dropout),
         )
 
-    def forward(self, x, obs_mask):
+    def forward(self, x, mask):
         residual = x
         x = self.ln1(x)
         attn_out, _ = self.attn(
             query=x, 
             key=x, 
             value=x, 
-            key_padding_mask=~obs_mask
+            key_padding_mask=~mask
         )
         
         x = residual + attn_out

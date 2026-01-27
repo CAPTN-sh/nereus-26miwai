@@ -9,7 +9,7 @@ class DESIREParams:
     obs_len: int = 10 * STEPS_PER_MINUTE
     pred_len: int = 5 * STEPS_PER_MINUTE
 
-    num_refine_iters: int = 2
+    num_refine_iters: int = 1
     hidden_size: int = 32
     intermediate_size: int = 16
 
@@ -18,7 +18,7 @@ class DESIREParams:
     out_channels: int = 16
 
     # sgm
-    obs_feat_dim = 11
+    obs_feat_dim = 13
     latent_size: int = 32
     num_samples: int = 6
 
