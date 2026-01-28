@@ -5,7 +5,15 @@ from models.traisformer.params import TraisformerParams
 from models.utils.maps.rasterize import Rasterizer
 from models.traisformer.transformer_block import Block
 from models.traisformer.map_encoder import ScenePoolingCNN
+from models.traisformer import heatmap_head
 
+HEAD_REGISTRY = {
+    "linear": heatmap_head.LinearHead,
+    "factorized": heatmap_head.FactorizedHead,
+    "cnn": heatmap_head.CNNHead,
+    "mixture": heatmap_head.MixtureHead,
+    "lowrank": heatmap_head.LowRankHead,
+}
 
 class TrAISformer(nn.Module):
     """Transformer for AIS trajectories."""
@@ -17,6 +25,7 @@ class TrAISformer(nn.Module):
         self.x_size, self.y_size, sog_size, cog_size, acc_size, rot_size = (
             self.rasterizer.get_total_grid_sizes()
         )
+        print("x,y:", self.x_size, self.y_size)
 
         # state_embd
         self.lat_emb = nn.Embedding(self.x_size, config.n_spatial_embd)
@@ -41,7 +50,9 @@ class TrAISformer(nn.Module):
 
         # pooling
         self.ln_f = nn.LayerNorm(config.n_embd)
-        self.intent_head = nn.Linear(config.n_embd, self.x_size * self.y_size)
+        # LinearHead, FactorizedHead, CNNHead, MixtureHead
+        head_cls = HEAD_REGISTRY[config.intent_head]
+        self.intent_head = head_cls(config.n_embd, self.x_size, self.y_size, config.k_rank)
 
         self.apply(self._init_weights)
         nn.init.normal_(self.pos_emb, std=0.02)
@@ -89,8 +100,7 @@ class TrAISformer(nn.Module):
         fea = self.ln_f(fea)
 
         z = fea[:, 0, :]
-        logits_flat = self.intent_head(z)
-        logits = logits_flat.view(B, 1, self.x_size, self.y_size)
+        logits = self.intent_head(z)
 
         return {"intent_logits": logits}
 

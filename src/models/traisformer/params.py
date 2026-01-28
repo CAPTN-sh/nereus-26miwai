@@ -5,6 +5,8 @@ from dataclasses import dataclass
 class TraisformerParams:
     # Sequence lengths
     pred_scope: str = "destination" # ["path", "destination"]
+    intent_head = "linear" # "linear", "factorized" "cnn", "mixture", "lowrank"
+    k_rank = 16
     
     pred_len: int = 1 * 12
     obs_len: int = 10 * 12 # fix at 10min

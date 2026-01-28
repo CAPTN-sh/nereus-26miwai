@@ -24,6 +24,7 @@ def loader_heatmap(
     file_name = f"{AIS_SOURCE}_{data_folder.name}_{flag}"
     dset = TrajectoryHeatmapDataset(
         nodes_path=data_folder / f"{file_name}_ship_features.parquet",
+        flag=flag,
         min_date=min_date,
         max_date=max_date,
         feat_cols=feat_cols,

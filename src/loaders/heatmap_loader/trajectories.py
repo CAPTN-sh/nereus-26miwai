@@ -1,6 +1,8 @@
 from datetime import timedelta
 from pathlib import Path
 
+import joblib
+
 import numpy as np
 import pandas as pd
 import pyproj
@@ -34,6 +36,7 @@ class TrajectoryHeatmapDataset(Dataset):
     def __init__(
         self,
         nodes_path: Path,
+        flag: str,
         min_date: pd.Timestamp,
         max_date: pd.Timestamp,
         feat_cols=[],
@@ -43,6 +46,21 @@ class TrajectoryHeatmapDataset(Dataset):
         normalize = False,
     ):
         super(TrajectoryHeatmapDataset, self).__init__()
+
+        cache_key = f"sl_{min_date.date()}_{max_date.date()}_{obs_len}_{fut_len}_{flag}_{int(normalize)}"
+        cache_path = Path("data/cache") / f"trajectory_heatmap_{cache_key}.joblib"
+
+        if cache_path.exists():
+            cache = joblib.load(cache_path)
+            self.items    = cache["items"]
+            self.feat_map = cache["feat_map"]
+            self.pos_map  = cache["pos_map"]
+            self.rel_map  = cache["rel_map"]
+            self.obs_len  = cache["obs_len"]
+            self.fut_len  = cache["fut_len"]
+            self.l_pad    = cache["l_pad"]
+            self.r_pad    = cache["r_pad"]
+            return
 
         min_valid_window = min_len_in_minutes * STEPS_PER_MINUTE
 
@@ -111,6 +129,17 @@ class TrajectoryHeatmapDataset(Dataset):
 
             for cur_t in range(obs_len, len(padded_pos) - fut_len):
                 self.items.append((cur_t, traj_id))
+
+        joblib.dump(dict(
+            items=self.items,
+            feat_map=self.feat_map,
+            pos_map=self.pos_map,
+            rel_map=self.rel_map,
+            obs_len=self.obs_len,
+            fut_len=self.fut_len,
+            l_pad=self.l_pad,
+            r_pad=self.r_pad,
+        ), cache_path)
 
     def __len__(self):
         return len(self.items)
