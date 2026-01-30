@@ -1,9 +1,8 @@
 from pathlib import Path
 
 import pandas as pd
-from torch.utils.data import DataLoader
-from torch.utils.data.distributed import DistributedSampler
 
+from torch_geometric.loader import DataLoader
 from loaders.graph_loader.trajectories import GraphTrajectoryDataset
 
 from utils.config import AIS_SOURCE
@@ -16,7 +15,7 @@ def graph_loader(
     batch_size: int,
     feat_cols=[],
     pin_memory=True,
-    pred_len=120,
+    pred_len=30,
     obs_len=60,
 ):
 
@@ -37,10 +36,9 @@ def graph_loader(
         batch_size=batch_size,
         num_workers=4,
         shuffle=True,
-        collate_fn=lambda x: x,
         pin_memory=pin_memory,
         prefetch_factor=4,
         persistent_workers=True,
         drop_last=True,
     )
-    return dset, loader
+    return loader

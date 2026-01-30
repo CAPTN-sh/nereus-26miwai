@@ -4,9 +4,9 @@ import numpy as np
 import pandas as pd
 import pyproj
 import torch
-from torch.utils.data import Dataset
 from tqdm import tqdm
-from loaders.graph_loader.normalizer import normalize
+from collections import defaultdict
+from torch_geometric.data import Data, Dataset
 
 from utils.config import SHIP_DB_PATH, STEPS_PER_MINUTE, STEP_SIZE, DATA_FOLDER_PATH
 
@@ -62,7 +62,7 @@ class GraphTrajectoryDataset(Dataset):
     ):
         super(GraphTrajectoryDataset, self).__init__()
 
-        self.transformer = pyproj.Transformer.from_crs(
+        self.coords = pyproj.Transformer.from_crs(
             pyproj.CRS("EPSG:4326"), 
             pyproj.CRS("EPSG:25832"), 
             always_xy=True
@@ -76,16 +76,11 @@ class GraphTrajectoryDataset(Dataset):
         self.r_pad = pred_len
 
         self.items = []
-        self.data = {}
-        self.traj_id_to_idx = {}
 
-        self.t0 = []
-        self.node_feat = []
-        self.node_feat_st = []
-        self.edge_feat = {}
-        self.edge_feat_st = {}
-
-        print("loading")
+        self.t0 = {}
+        self.pos_map = {}
+        self.feat_map = {}
+        self.edge_map = defaultdict(dict)
 
         nodes = pd.read_parquet(nodes_path)
         nodes = process_time(nodes, min_date, max_date)
@@ -102,8 +97,6 @@ class GraphTrajectoryDataset(Dataset):
             .head(max_neighbors)
         )
 
-        print("merging")
-
         traj_id = nodes.reset_index()[["time", "mmsi", "traj_id"]].copy()
         risk_mmsi = risk_mmsi.merge(traj_id, on=["time", "mmsi"], how="left")
         traj_id.columns = ["time", "mmsi_other", "traj_id_other"]
@@ -111,22 +104,18 @@ class GraphTrajectoryDataset(Dataset):
 
         traj_id_in_frame = get_in_frame_dict(risk_mmsi)
 
-        print("norm")
-
         nodes = nodes.fillna(0).sort_index()
-        nodes["x"], nodes["y"] = self.transformer.transform(
-            nodes["lon"].values, 
-            nodes["lat"].values
-        )
-        nodes = nodes[["traj_id", "x", "y", "speed", "course"]]
+        nodes = cords_to_meters(nodes)
+        traj_g = nodes.groupby("traj_id")
+        nodes[["rel_x", "rel_y"]] = traj_g[["x", "y"]].diff().fillna(0)
 
-        nodes["x_st"] = (nodes["x"] - 573663) / (586057 - 573663)
-        nodes["y_st"] = (nodes["y"] - 6018805) / (6035410 - 6018805)
-        nodes["speed_st"] = nodes["speed"] / 40
-        nodes["course_st"] = nodes["course"] / 360
+        nodes = nodes[["traj_id", "x", "y", "rel_x", "rel_y", "speed"]]
+        edges = risk_mmsi[["time", "traj_id", "traj_id_other", "dist"]]
 
-        edges = risk_mmsi[["time", "traj_id", "traj_id_other", "dist"]].set_index("time").sort_index()
-        edges["dist_st"] = edges["dist"] / 2000
+        nodes["rel_x"] = nodes["rel_x"] / 100.0
+        nodes["rel_y"] = nodes["rel_y"] / 100.0
+        nodes["speed"] = nodes["speed"] / 40
+        edges["dist"] = edges["dist"] / 2000
 
         print("sample")
 
@@ -135,71 +124,83 @@ class GraphTrajectoryDataset(Dataset):
                 neighbors = traj_id_in_frame.get((cur_t, traj_id), [])
                 self.items.append((cur_t, traj_id, neighbors))
 
-        for idx, (traj_id, df) in enumerate(tqdm(nodes.groupby("traj_id"), desc="nodes")):
-            self.traj_id_to_idx[traj_id] = idx
-            self.t0.append(df.index[0])
-            self.node_feat.append(self._pad(df[["x", "y"] + feat_cols].to_numpy(dtype=np.float32)))
-            self.node_feat_st.append(self._pad(df[["x_st", "y_st"] + [f"{c}_st" for c in feat_cols]].to_numpy(dtype=np.float32)))
+        for traj_id, df in tqdm(nodes.groupby("traj_id"), desc="nodes"):
+            self.t0[traj_id] = df.index[0]
 
-        for (traj_id, traj_id_other), df in tqdm(edges.groupby(["traj_id", "traj_id_other"]), desc="Edges"):
-            t0 = self.t0[self.traj_id_to_idx[traj_id]]
-            tN = t0 + len(self.node_feat[self.traj_id_to_idx[traj_id]]) - self.l_pad - self.r_pad
+            pos = df[["x", "y"]].to_numpy(dtype=np.float32)
+            padded_pos = np.pad(pos, ((self.l_pad, self.r_pad), (0, 0)), mode='constant')
+            self.pos_map[traj_id] = padded_pos
 
-            full_index = np.arange(t0, tN)
-            df = df.reindex(full_index, fill_value=0)
+            feat = df[["rel_x", "rel_y", "speed"]].to_numpy(dtype=np.float32)
+            padded_feat = np.pad(feat, ((self.l_pad, self.r_pad), (0, 0)), mode='constant')
+            self.feat_map[traj_id] = padded_feat
 
-            dist = df["dist"].to_numpy(dtype=np.float32)[:, None]
-            dist_st = df["dist_st"].to_numpy(dtype=np.float32)[:, None]
-
-            self.edge_feat[(traj_id, traj_id_other)] = self._pad(dist)
-            self.edge_feat_st[(traj_id, traj_id_other)] = self._pad(dist_st)
+        for row in tqdm(edges.itertuples(), desc="Edges"):
+            self.edge_map[(row.time, row.traj_id)][row.traj_id_other] = [row.dist]
 
 
     def __len__(self):
         return len(self.items)
 
     def __getitem__(self, index):
-        cur_t, traj_id, neighbors = self.items[index]
+        cur_t, target_id, neighbors = self.items[index]
 
-        idx = self.traj_id_to_idx[traj_id]
-        t_0 = self.t0[idx]
-        node_feat = self.node_feat[idx]
-        node_feat_st = self.node_feat_st[idx]
+        node_ids = [target_id] + neighbors
 
-        hist_len = cur_t - t_0
-        first_history_index = torch.tensor([max(0, self.obs_len - hist_len)])
+        obs_feat_list = []
+        obs_pos_list = []
+        fut_feat_list = []
+        fut_pos_list = []
 
-        cur_idx = self.l_pad + hist_len
+        obs_mask_list = []
+        fut_mask_list = []
 
-        x_t = node_feat[cur_idx - self.obs_len : cur_idx]
-        y_t = node_feat[cur_idx : cur_idx + self.pred_len, :2]
-        x_st_t = node_feat_st[cur_idx - self.obs_len : cur_idx]
-        y_st_t = node_feat_st[cur_idx : cur_idx + self.pred_len, :2]
+        for traj_id in node_ids:
+            t0 = self.t0[traj_id]
+            pos = self.pos_map[traj_id]
+            feat = self.feat_map[traj_id]
 
-        neighbors_data_st = []
-        neighbors_edge_value = []
-        for nn_traj_id in neighbors:
-            nn_idx = self.traj_id_to_idx[nn_traj_id]
-            
-            # Neighbor node state
-            nn_node_feat_st = self.node_feat_st[nn_idx]
-            nn_traj = nn_node_feat_st[cur_idx - self.obs_len : cur_idx]
-            neighbors_data_st.append(torch.from_numpy(nn_traj).unsqueeze(0))
+            t = self.l_pad + cur_t-t0
 
-            # Edge feature (traj_id -> nn_traj_id)
-            edge_feat = self.edge_feat_st[(traj_id, nn_traj_id)]
-            edge_slice = edge_feat[cur_idx - self.obs_len : cur_idx]
-            neighbors_edge_value.append(torch.from_numpy(edge_slice).unsqueeze(0))
+            obs_feat_list.append(feat[t-self.obs_len:t])
+            obs_pos_list.append(pos[t-self.obs_len:t])
+            fut_feat_list.append(feat[t:t+self.pred_len])
+            fut_pos_list.append(pos[t:t+self.pred_len])
 
-        x_t = self._to_tensor(x_t)
-        y_t = self._to_tensor(y_t)
-        x_st_t = self._to_tensor(x_st_t)
-        y_st_t = self._to_tensor(y_st_t)
+            obs_mask_list.append(np.arange(t - self.obs_len, t) >= self.l_pad)
+            fut_mask_list.append(np.arange(t, t + self.pred_len) < (len(pos) - self.r_pad))
 
-        return first_history_index, x_t, y_t, x_st_t, y_st_t, neighbors_data_st, neighbors_edge_value, None, None
+        t0 = self.t0[target_id]
+        edge_index = [[],[]]
+        edge_attr = []
+        for a_idx, a_traj_id in enumerate(node_ids):
+            edges = self.edge_map.get((cur_t, a_traj_id))
+            if not edges:
+                continue
+            for b_idx, b_traj_id in enumerate(node_ids):
+                edge = edges.get(b_traj_id)
+                if not edge:
+                    continue
+                edge_attr.append(edge)
+                edge_index[0].append(a_idx)
+                edge_index[1].append(b_idx)
 
-    def _to_tensor(self, traj, dtype=torch.float32):
-        return torch.from_numpy(traj).unsqueeze(0).to(dtype)
+        is_ego = torch.zeros(len(node_ids), dtype=torch.bool)
+        is_ego[0] = True
+
+        data = Data(
+            x=torch.from_numpy(np.asarray(obs_feat_list)).float(),
+            x_pos=torch.from_numpy(np.asarray(obs_pos_list)).float(),
+            obs_mask=torch.from_numpy(np.asarray(obs_mask_list)).bool(),
+            edge_index=torch.from_numpy(np.asarray(edge_index)).long(),
+            edge_attr=torch.from_numpy(np.asarray(edge_attr)).float(),
+            y=torch.from_numpy(np.asarray(fut_feat_list)).float(),
+            y_pos=torch.from_numpy(np.asarray(fut_pos_list)).float(),
+            fut_mask=torch.from_numpy(np.asarray(fut_mask_list)).bool(),
+            is_ego = is_ego,
+        )
+
+        return data
     
     def _pad(self, x):
         return np.pad(x, ((self.l_pad, self.r_pad), (0, 0)), mode='constant')
@@ -208,17 +209,17 @@ class GraphTrajectoryDataset(Dataset):
 if __name__ == "__main__":
     data_folder = DATA_FOLDER_PATH / "ais/4_features/fh_10/kiel"
 
-    file_name = "fh_kiel_val"
+    flag="train"
+    file_name = f"fh_kiel_{flag}"
     dset = GraphTrajectoryDataset(
         nodes_path=data_folder / f"{file_name}_ship_features.parquet",
         edges_path=data_folder / f"{file_name}_ship2ship_features.parquet",
-        flag="val",
+        flag=flag,
         min_date=pd.Timestamp("2022-01-01"),
         max_date=pd.Timestamp("2024-01-01"),
-        feat_cols=["speed", "course"],
+        feat_cols=["speed"],
         pred_len=30,
         obs_len=60,
     )
 
     print("Num samples:", len(dset))
-    print("Num trajectories:", len(dset.traj_id_to_idx))
