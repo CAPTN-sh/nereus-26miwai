@@ -36,9 +36,9 @@ def graph_loader(
         batch_size=batch_size,
         num_workers=4,
         shuffle=True,
-        pin_memory=pin_memory,
+        pin_memory=True,
         prefetch_factor=4,
-        persistent_workers=True,
+        persistent_workers=False,
         drop_last=True,
     )
     return loader

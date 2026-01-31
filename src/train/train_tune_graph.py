@@ -12,7 +12,7 @@ import torch.optim as optim
 from tqdm import tqdm
 import optuna
 
-from models.gnn.model import GNNLSTM
+from models.gnn.model import GNNLSTM, LSTM, Seq2SeqLSTM, Seq2SeqGNNLSTM
 from models.gnn.loss import loss, eval
 from models.gnn.params import GNNLSTMParams
 from loaders.graph_loader.loader import graph_loader
@@ -176,7 +176,7 @@ def train_single_gpu(
         for batch in tqdm(train_loader, desc=f"Epoch {epoch}"):
             optimizer.zero_grad(set_to_none=True)
 
-            batch = [t.to(device, non_blocking=True) for t in batch]
+            batch = batch.to(device, non_blocking=True)
             output = model(batch, scene)
             loss, _loss_dict = loss_fn(output, batch, config=cfg)
 
@@ -246,17 +246,24 @@ def make_objective(
     # pick model
     if model_choice == "GNNLSTM":
         model_cls, cfg, loss_fn, eval_fn = GNNLSTM, GNNLSTMParams(), loss, eval
+    elif model_choice == "LSTM":
+        model_cls, cfg, loss_fn, eval_fn = LSTM, GNNLSTMParams(), loss, eval
+    elif model_choice == "Seq2SeqLSTM":
+        model_cls, cfg, loss_fn, eval_fn = Seq2SeqLSTM, GNNLSTMParams(), loss, eval
+    elif model_choice == "Seq2SeqGNNLSTM":
+        model_cls, cfg, loss_fn, eval_fn = Seq2SeqGNNLSTM, GNNLSTMParams(), loss, eval
     else:
         raise ValueError(f"Unknown model_choice: {model_choice}")
 
     def objective(trial: optuna.Trial):
-        if (model_choice == "GNNLSTM"):
-            hidden_size = trial.suggest_categorical("hidden_size", [256]) #256, 512, 
-            cfg.enc_hidden_size = hidden_size
-            cfg.dec_hidden_size = hidden_size
+        #if (model_choice == "GNNLSTM"):
+        hidden_size = trial.suggest_categorical("hidden_size", [256]) #256, 512, 
+        cfg.enc_hidden_size = hidden_size
+        cfg.gnn_hidden_size = hidden_size
+        cfg.dec_hidden_size = hidden_size
 
         # --- general params ---
-        lr = trial.suggest_categorical("lr",  [1e-4])
+        lr = trial.suggest_categorical("lr",  [1e-3])
         weight_decay = trial.suggest_categorical("weight_decay",  [1e-5])
         batch_size = trial.suggest_categorical("batch_size", [512])
         cfg.obs_len = 10 * STEPS_PER_MINUTE
@@ -364,5 +371,19 @@ if __name__ == "__main__":
 """
 [Experiment 1] Best observation length for short and long term
 CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=GNNLSTM OPTUNA_STORAGE="sqlite:///graph.db" OPTUNA_STUDY="graph" OPTUNA_JSONL="graph.jsonl" python -u src/train/train_tune_graph.py
+
+CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///g_lstm.db" OPTUNA_STUDY="g_lstm" OPTUNA_JSONL="g_lstm.jsonl" python -u src/train/train_tune_graph.py
+
+CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=Seq2SeqLSTM OPTUNA_STORAGE="sqlite:///g_s2slstm.db" OPTUNA_STUDY="g_s2slstm" OPTUNA_JSONL="g_s2slstm.jsonl" python -u src/train/train_tune_graph.py
+CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=Seq2SeqGNNLSTM OPTUNA_STORAGE="sqlite:///g_s2sgnnlstm.db" OPTUNA_STUDY="g_s2sgnnlstm" OPTUNA_JSONL="g_s2sgnnlstm.jsonl" python -u src/train/train_tune_graph.py
+
+
+
+
+    if model_choice == "LSTM":
+        model_cls, cfg, loss_fn, eval_fn = LSTM, GNNLSTMParams(), loss, eval
+    if model_choice == "Seq2SeqLSTM":
+        model_cls, cfg, loss_fn, eval_fn = Seq2SeqLSTM, GNNLSTMParams(), loss, eval
+    if model_choice == "Seq2SeqGNNLSTM":
 
 """

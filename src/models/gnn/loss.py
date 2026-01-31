@@ -1,19 +1,16 @@
 import torch.nn as nn
 import torch
 from torch_geometric.loader import DataLoader
-import tqdm
+from tqdm import tqdm
 import logging
 import geopandas as gpd
 
 def loss(pred_rel, batch, config = None):
     #Data(x, x_pos, obs_mask, edge_index, edge_attr, y, y_pos, fut_mask)
-    revert_norm = 100.0
-    pred_abs = torch.cumsum(pred_rel, dim=1) * revert_norm + batch.x_pos[:, -1:, :]
-
     ego_mask = batch.is_ego
 
-    pred_ego = pred_abs[ego_mask]
-    gt_ego   = batch.y_pos[ego_mask]
+    pred_ego = pred_rel[ego_mask]
+    gt_ego = batch.y[ego_mask][:, :, :2]
     fut_mask = batch.fut_mask[ego_mask]
 
     err = (pred_ego - gt_ego).pow(2).sum(dim=-1)
@@ -27,6 +24,34 @@ def loss(pred_rel, batch, config = None):
 
     return mse, {"mse": mse}
 
+def ade_per_agent(pred_abs, batch):
+    #Data(x, x_pos, obs_mask, edge_index, edge_attr, y, y_pos, fut_mask)
+    ego_mask = batch.is_ego
+
+    pred_ego = pred_abs[ego_mask]
+    gt_ego = batch.y_pos[ego_mask]
+    fut_mask = batch.fut_mask[ego_mask]
+
+    dist = torch.norm(pred_ego - gt_ego, dim=-1)
+    dist = dist * fut_mask
+
+    ade_per_agent = dist.sum(dim=1) / fut_mask.sum(dim=1).clamp_min(1)
+
+    return ade_per_agent
+
+def fde_per_agent(pred_abs, batch):
+    ego_mask = batch.is_ego
+
+    pred_ego = pred_abs[ego_mask]
+    gt_ego = batch.y_pos[ego_mask]
+    fut_mask = batch.fut_mask[ego_mask]
+    full_traj_mask = fut_mask.bool().all(dim=1)
+
+    dist = torch.norm(pred_ego - gt_ego, dim=-1)
+
+    fde = dist[:, -1][full_traj_mask]
+    return fde
+
 def eval(
     epoch: int,
     model: nn.Module,
@@ -36,8 +61,6 @@ def eval(
     trial_number = 0,
     config=None,
 ):
-    logging.info(f"[Eval] epoch={epoch} ade: TODO")
-    return 0
 
     model.eval()
 
@@ -54,18 +77,18 @@ def eval(
 
             num_batches += 1
 
-            batch = [t.to(device, non_blocking=True) for t in batch]
+            batch = batch.to(device, non_blocking=True)
             pred_rel = model(batch, scene)
 
-            _, obs_pos, _, obs_mask, fut_pos, _, fut_mask, _ = batch
-            pred_abs = torch.cumsum(pred_rel, dim=1) + obs_pos[:, -1:, :] 
+            revert_norm = 100.0
+            pred_abs = torch.cumsum(pred_rel, dim=1) * revert_norm + batch.x_pos[:, -1:, :]
 
-            ade = ade(pred_abs, fut_pos, fut_mask)
+            ade = ade_per_agent(pred_abs, batch)
             ade_sum += ade.sum().item()
             n_ade += ade.numel()
 
-            fde = fde(pred_abs, fut_pos, fut_mask)
-            fde_sum += fde.sum().item()
+            fde = fde_per_agent(pred_abs, batch)
+            fde_sum +=  fde.sum().item()
             n_fde += fde.numel()
 
     ade_avg = ade_sum / n_ade
