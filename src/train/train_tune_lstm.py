@@ -12,13 +12,13 @@ import torch.optim as optim
 from tqdm import tqdm
 import optuna
 
-from models.gnn.model import GNNLSTM, LSTM, Seq2SeqLSTM, Seq2SeqGNNLSTM
-from models.gnn.loss import loss, eval
-from models.gnn.params import GNNLSTMParams
+from models.nereus.rnn import LSTM
+from models.nereus.loss import loss, eval, mdn_loss, eval_mdn
+from models.nereus.params import NEREUSParams
 from loaders.graph_loader.loader import graph_loader
 from utils.logger import logger
 from train.early_stopper import EarlyStopper
-from models.utils.maps.scene_gernerator import process_maps
+from models.utils.maps.scene_gernerator import SceneLoader
 from models.utils.maps.rasterize import Rasterizer
 
 from utils.config import DATA_FOLDER_PATH, STEPS_PER_MINUTE
@@ -99,54 +99,49 @@ def train_single_gpu(
     logging.info(f"[Trial] number={trial.number}")
     trial_settings = {k: round(v, 6) if isinstance(v, float) else v for k, v in trial.params.items()}
     logging.info(f"[Trial {trial.number}] {trial_settings}")
+    
+    path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/"
+    sl = SceneLoader(Rasterizer([10.12, 54.31, 10.33, 54.46]))
+
+    scene_contiguous = np.ascontiguousarray(sl.load_scene(path))
+    scene = torch.from_numpy(scene_contiguous).to(device).to(torch.float32)
 
     model = model_cls(cfg).to(device)
     num_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logging.info(f"Trainable parameters: {num_trainable:,}")
 
-    if num_trainable > 10_000_000:
-        logging.info(f"[TrialPruned] Parameter budget exceeded: {num_trainable:,}")
-        raise optuna.exceptions.TrialPruned()
-    
-    if num_trainable < 0:
-        logging.info(f"[TrialPruned] Below 50% of Parameter budget: {num_trainable:,}")
-        raise optuna.exceptions.TrialPruned()
+    #if num_trainable > 10_000_000:
+    #    logging.info(f"[TrialPruned] Parameter budget exceeded: {num_trainable:,}")
+    #    raise optuna.exceptions.TrialPruned()
 
-    feat_cols = ["speed", "course"]
-    train_loader = graph_loader(
+    train_loader, train_dset = graph_loader(
         data_folder=data_folder,
         flag="train",
         min_date=pd.Timestamp("2022-01-01"),
         max_date=pd.Timestamp("2024-01-01"),
         batch_size=batch_size,
         pin_memory=True,
-        feat_cols=feat_cols,
         pred_len=cfg.pred_len,
         obs_len=cfg.obs_len,
+        max_edge_dist = cfg.gnn_max_dist,
     )
 
-    eval_loader = graph_loader(
+    eval_loader, _ = graph_loader(
         data_folder=data_folder,
         flag="val",
         min_date=pd.Timestamp("2022-01-01"),
         max_date=pd.Timestamp("2024-01-01"),
         batch_size=batch_size,
         pin_memory=True,
-        feat_cols=feat_cols,
         pred_len=cfg.pred_len,
         obs_len=cfg.obs_len,
+        max_edge_dist = cfg.gnn_max_dist,
     )
-
-    path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/"
-    my_rasterizer = Rasterizer([10.12, 54.31, 10.33, 54.46])
-
-    scene_contiguous = np.ascontiguousarray(process_maps(my_rasterizer, path))
-    scene = torch.from_numpy(scene_contiguous).unsqueeze(0).to(device).to(torch.float32)
 
     total_batches = 0
     num_batches = 0
     loss_sum = 0.0
-    max_batches = 20_000
+    max_batches = 25_000
     batches_per_eval = 1_000
     max_seconds = 60 * 60 * 1
     
@@ -239,34 +234,20 @@ def train_single_gpu(
             break
     return best_metric
 
-def make_objective(
-    model_choice: str,
-    data_folder: Path,
-):
-    # pick model
-    if model_choice == "GNNLSTM":
-        model_cls, cfg, loss_fn, eval_fn = GNNLSTM, GNNLSTMParams(), loss, eval
-    elif model_choice == "LSTM":
-        model_cls, cfg, loss_fn, eval_fn = LSTM, GNNLSTMParams(), loss, eval
-    elif model_choice == "Seq2SeqLSTM":
-        model_cls, cfg, loss_fn, eval_fn = Seq2SeqLSTM, GNNLSTMParams(), loss, eval
-    elif model_choice == "Seq2SeqGNNLSTM":
-        model_cls, cfg, loss_fn, eval_fn = Seq2SeqGNNLSTM, GNNLSTMParams(), loss, eval
-    else:
-        raise ValueError(f"Unknown model_choice: {model_choice}")
+def make_objective(data_folder: Path):
 
     def objective(trial: optuna.Trial):
-        #if (model_choice == "GNNLSTM"):
-        hidden_size = trial.suggest_categorical("hidden_size", [256]) #256, 512, 
-        cfg.enc_hidden_size = hidden_size
-        cfg.gnn_hidden_size = hidden_size
-        cfg.dec_hidden_size = hidden_size
+        model_cls, cfg, loss_fn, eval_fn = LSTM, NEREUSParams(), loss, eval
 
-        # --- general params ---
-        lr = trial.suggest_categorical("lr",  [1e-3])
-        weight_decay = trial.suggest_categorical("weight_decay",  [1e-5])
-        batch_size = trial.suggest_categorical("batch_size", [512])
-        cfg.obs_len = 10 * STEPS_PER_MINUTE
+        # general params
+        lr = trial.suggest_categorical("lr", [1e-3])
+        weight_decay = 1e-4
+        batch_size = 512
+
+        # GNN
+        hidden = trial.suggest_categorical("hidden_size", [384, 512])
+        cfg.enc_hidden_size = hidden
+        cfg.dec_hidden_size = hidden
 
         try:
             metric = train_single_gpu(
@@ -294,17 +275,17 @@ def run_worker():
     One worker process. It sees exactly ONE GPU because launcher sets CUDA_VISIBLE_DEVICES.
     All workers share the same Optuna storage to coordinate trials.
     """
+    grid = {
+        "hidden_size": [384, 512],
+    }
+
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.set_float32_matmul_precision("high")
 
-    model_choice = os.environ.get("MODEL_CHOICE", "TRAISFORMER")
-    storage = os.environ.get(
-        "OPTUNA_STORAGE", f"sqlite:///optuna_{model_choice.lower()}.db"
-    )
+    model_choice = os.environ.get("MODEL_CHOICE")
+    storage = os.environ.get("OPTUNA_STORAGE", f"sqlite:///optuna_{model_choice.lower()}.db")
     study_name = os.environ.get("OPTUNA_STUDY", f"hpo_{model_choice.lower()}")
-
-    # Shared JSONL path (same for all workers)
     jsonl_path = Path(os.environ.get("OPTUNA_JSONL", f"optuna_{study_name}.jsonl"))
 
     # your paths
@@ -313,23 +294,8 @@ def run_worker():
     logger(file_prefix=f"optuna_worker_{model_choice}")
     logging.info(study_name)
 
-    """
-    cnn:
-    2026-01-28 20:30:22,353 - INFO - Trainable parameters: 1,585,297
-    2026-01-28 20:30:22,354 - INFO - Trainable parameters head: 688,481
-
-    2026-01-28 20:31:44,392 - INFO - Trainable parameters: 2,427,316
-    2026-01-28 20:31:44,392 - INFO - Trainable parameters head: 1,530,500
-    """
-
-    if False:
-        sampler = optuna.samplers.GridSampler({
-            "head": ["lowrank", "factorized", "mixture"],
-            "k_rank": [8, 16, 32],
-            "n_layer": [2, 4, 6, 8],
-            "n_head": [4, 8],
-            "n_embd": [128, 256],
-        })
+    if True:
+        sampler = optuna.samplers.GridSampler(grid)
         pruner = optuna.pruners.NopPruner()
     else:
         sampler = optuna.samplers.TPESampler(
@@ -352,14 +318,11 @@ def run_worker():
         pruner=pruner,
     )
 
-    objective = make_objective(
-        model_choice=model_choice,
-        data_folder=data_folder,
-    )
+    objective = make_objective(data_folder=data_folder)
 
     cb = trial_jsonl_callback(jsonl_path)
 
-    study.optimize(objective, n_trials=4, gc_after_trial=True, callbacks=[cb])
+    study.optimize(objective, n_trials=50, gc_after_trial=True, callbacks=[cb])
 
     if study.best_trial is not None:
         logging.info(f"BEST value={study.best_value}")
@@ -370,20 +333,11 @@ if __name__ == "__main__":
 
 """
 [Experiment 1] Best observation length for short and long term
-CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=GNNLSTM OPTUNA_STORAGE="sqlite:///graph.db" OPTUNA_STUDY="graph" OPTUNA_JSONL="graph.jsonl" python -u src/train/train_tune_graph.py
 
-CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///g_lstm.db" OPTUNA_STUDY="g_lstm" OPTUNA_JSONL="g_lstm.jsonl" python -u src/train/train_tune_graph.py
-
-CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=Seq2SeqLSTM OPTUNA_STORAGE="sqlite:///g_s2slstm.db" OPTUNA_STUDY="g_s2slstm" OPTUNA_JSONL="g_s2slstm.jsonl" python -u src/train/train_tune_graph.py
-CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=Seq2SeqGNNLSTM OPTUNA_STORAGE="sqlite:///g_s2sgnnlstm.db" OPTUNA_STUDY="g_s2sgnnlstm" OPTUNA_JSONL="g_s2sgnnlstm.jsonl" python -u src/train/train_tune_graph.py
+# encoder decoder
+CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///nereus_lstm.db" OPTUNA_STUDY="nereus_lstm" OPTUNA_JSONL="nereus_lstm.jsonl" python -u src/train/train_tune_lstm.py
 
 
-
-
-    if model_choice == "LSTM":
-        model_cls, cfg, loss_fn, eval_fn = LSTM, GNNLSTMParams(), loss, eval
-    if model_choice == "Seq2SeqLSTM":
-        model_cls, cfg, loss_fn, eval_fn = Seq2SeqLSTM, GNNLSTMParams(), loss, eval
-    if model_choice == "Seq2SeqGNNLSTM":
+CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=NEREUS OPTUNA_STORAGE="sqlite:///nereus_ed_big.db" OPTUNA_STUDY="nereus_ed_big" OPTUNA_JSONL="nereus_ed_big.jsonl" python -u src/train/train_tune_nereus.py
 
 """

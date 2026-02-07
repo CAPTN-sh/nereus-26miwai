@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 from models.nereus.scene import ScenePoolingCNN
 from models.nereus.params import NEREUSParams
-from models.nereus.rnn import LSTMEncoder, LSTMDecoder
+from models.nereus.rnn import GRUEncoder, MDNDecoder
 from torch_geometric.data import Data
 from models.utils.maps.rasterize import Rasterizer
 
@@ -21,8 +21,31 @@ class NEREUS(nn.Module):
         module_count = 2
 
         # ENCODER
-        self.encoder = LSTMEncoder(config)
+        self.encoder = GRUEncoder(config)
         self.enc_proj = nn.Linear(config.enc_hidden_size, config.dec_hidden_size)
+
+        # STATIC
+        self.static_proj = nn.Linear(config.static_feat_dim, config.dec_hidden_size)
+
+        # SOCIAL
+        self.social_module = social_module
+        if self.social_module:
+            self.gnn_proj = nn.Linear(config.gnn_hidden_size, config.dec_hidden_size)
+            module_count += 1
+
+        # MAP
+        self.map_module = map_module
+        if self.map_module:
+            self.map_cnn = ScenePoolingCNN(self.rasterizer, in_channels=4, out_channels=config.map_cnn_out)
+            self.map_proj = nn.Linear(config.map_cnn_out, config.dec_hidden_size)
+            module_count += 1
+
+        # PRIOR
+        self.prior_module = prior_module
+        if self.prior_module:
+            self.prior_cnn = ScenePoolingCNN(self.rasterizer, in_channels=1, out_channels=config.prior_cnn_out)
+            self.prior_proj = nn.Linear(config.prior_cnn_out, config.dec_hidden_size)
+            module_count += 1
 
         # DECODER
         self.w = nn.Parameter(torch.tensor([1.0] * module_count))
@@ -45,6 +68,10 @@ class NEREUS(nn.Module):
         h_stack.append(h_static.unsqueeze(0))
 
         if self.social_module:
+            #h_social = self.social_module(h_enc_all, data)
+            #h_social = self.gnn_proj(h_social[ego_idx])
+            #h_stack.append(h_social.unsqueeze(0))
+
             h_gnn = self.social_module(h_enc_all, data.edge_index, data.edge_attr)
             h_gnn = self.gnn_proj(h_gnn[ego_idx])
             h_stack.append(h_gnn.unsqueeze(0))

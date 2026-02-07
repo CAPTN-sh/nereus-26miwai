@@ -8,19 +8,21 @@ RASTER = Rasterizer(TraisformerParams().bbox)
 
 def loss_intent_heatmap(
     output: Dict[str, torch.Tensor],
-    batch,
+    data,
     config=None,
 ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
     
-    logits = output["intent_logits"]
-    B, C, H, W = logits.shape
+    logits = output[data.fin_pos_mask]
+    assert logits.shape[1] == 1
+    logits = logits.squeeze(1)
+    B, H, W = logits.shape
     
     # 1. Wahrscheinlichkeiten berechnen
     probs_fine = F.softmax(logits.view(B, -1), dim=1) # (B, H*W)
     log_probs_fine = F.log_softmax(logits.view(B, -1), dim=1)
 
     # 2. Target Erstellung (Ground Truth)
-    *_, fin_pos = batch
+    fin_pos = data.fin_pos[data.fin_pos_mask]
     target_fine = rasterize_destination(fin_pos) # (B, H, W)
     target_fine_flat = target_fine.view(B, -1)
     
@@ -79,19 +81,23 @@ def rasterize_destination(fin_pos):
 
 def loss_occupancy_heatmap(
     output: Dict[str, torch.Tensor],
-    batch,
+    data,
     config=None,
 ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
     
-    logits = output["intent_logits"] # (B, 1, H, W)
-    B, C, H, W = logits.shape
+    logits = output # (B, 1, H, W)
+    assert logits.shape[1] == 1
+    logits = logits.squeeze(1)
+
+    B, H, W = logits.shape
     
     # 1. Probabilities (Softmax over the entire spatial grid)
     probs_fine = F.softmax(logits.view(B, -1), dim=1) # (B, H*W)
     log_probs_fine = F.log_softmax(logits.view(B, -1), dim=1)
     
     # 2. Ground Truth & Normalization
-    *_, fut_pos, _, fut_mask, _ = batch
+    fut_pos = data.y_pos
+    fut_mask = data.y_mask
     target_fine = rasterize_occupancy(fut_pos, fut_mask) # (B, H, W)
     target_flat = target_fine.view(B, -1)
 

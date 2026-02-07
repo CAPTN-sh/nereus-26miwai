@@ -45,7 +45,7 @@ def eval_heatmap(
             if num_batches >= 500:
                 break
 
-            batch = [t.to(device) for t in batch]
+            batch = batch.to(device, non_blocking=True)
             output = model(batch, scene)
             
             if config.pred_scope == "path":
@@ -65,18 +65,18 @@ def eval_heatmap(
             # Qualitative Plots (Bleibt gleich)
             if not plotted:
                 plotted = True
-                logits = output["intent_logits"]
+                logits = output
                 B, _, x_bins, y_bins = logits.shape
-                _, obs_pos, _, obs_mask, fut_pos, _, fut_mask, fin_pos = batch
 
                 if config.pred_scope == "path":
-                    target = rasterize_occupancy(fut_pos, fut_mask)
+                    target = rasterize_occupancy(batch.y_pos, batch.y_mask)
                 if config.pred_scope == "destination":
+                    fin_pos = batch.fin_pos[batch.fin_pos_mask]
                     target = rasterize_destination(fin_pos)
+                    logits = logits[batch.fin_pos_mask]
                 probs = F.softmax(logits.flatten(1), dim=1)
 
                 for i in range(min(n_plots, B)):
-                    obs_i = obs_pos[i][obs_mask[i]]
                     p_hmap = probs.view(B, x_bins, y_bins)[i].detach().cpu().numpy()
                     plot_heatmap(f"pred_heatmap_{config.pred_scope[:4]}_tn{trial_number}_{i}", p_hmap, epoch=epoch)
 

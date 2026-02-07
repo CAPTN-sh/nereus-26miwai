@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 from matplotlib.ticker import ScalarFormatter
-from models.traisformer.loss import RASTER
+from models.traisformer.hierarchical_loss import RASTER
 
 DPI = 150
 PX_PER_CELL = 3

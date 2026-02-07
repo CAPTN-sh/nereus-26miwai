@@ -13,10 +13,10 @@ def graph_loader(
     min_date: pd.Timestamp,
     max_date: pd.Timestamp,
     batch_size: int,
-    feat_cols=[],
     pin_memory=True,
     pred_len=30,
     obs_len=60,
+    max_edge_dist=500
 ):
 
     file_name = f"{AIS_SOURCE}_{data_folder.name}_{flag}"
@@ -26,9 +26,9 @@ def graph_loader(
         flag=flag,
         min_date=min_date,
         max_date=max_date,
-        feat_cols=feat_cols,
         pred_len=pred_len,
         obs_len=obs_len,
+        max_edge_dist=max_edge_dist,
     )
 
     loader = DataLoader(
@@ -36,9 +36,9 @@ def graph_loader(
         batch_size=batch_size,
         num_workers=4,
         shuffle=True,
-        pin_memory=True,
+        pin_memory=pin_memory,
         prefetch_factor=4,
         persistent_workers=False,
         drop_last=True,
     )
-    return loader
+    return loader, dset

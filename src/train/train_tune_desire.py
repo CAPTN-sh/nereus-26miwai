@@ -16,7 +16,6 @@ from models.desire.model import DESIRE
 from models.desire.nn.loss import loss_desire
 from models.desire.utils.params import DESIREParams
 from models.lstm.loss import mse, eval_lstm
-from models.lstm.model import LSTMModel
 from models.lstm.params import LSTMParams
 from models.traisformer.hierarchical_loss import loss_intent_heatmap, loss_occupancy_heatmap
 from models.traisformer.model import TrAISformer
@@ -26,7 +25,7 @@ from loaders.scene_loader.loader import scene_loader
 from train.eval import eval, eval_loss
 from utils.logger import logger
 from train.early_stopper import EarlyStopper
-from models.utils.maps.scene_gernerator import process_maps
+from models.utils.maps.scene_gernerator import SceneLoader
 
 from utils.config import DATA_FOLDER_PATH
 
@@ -105,7 +104,21 @@ def train_single_gpu(
     trial_settings = {k: round(v, 6) if isinstance(v, float) else v for k, v in trial.params.items()}
     logging.info(f"[Trial {trial.number}] {trial_settings}")
 
+    best_ckpt_path = "checkpoints/trial_0_best.pt"
+    device = torch.device("cuda:0")
+    torch.cuda.set_device(device)
+
+    ckpt = torch.load(best_ckpt_path, map_location=device)
+    cfg = ckpt["config"]
+    print(cfg.num_samples)
+    cfg.num_samples = 5
+    model = DESIRE(cfg)
+    model.to(device)
+    model.load_state_dict(ckpt["model_state_dict"])
+    model.eval()
+
     feat_cols = ["speed", "course", "acc", "angular_difference", "length", "width", "ship_group", "hour_of_day"]
+    """
     train_dset, _, train_loader = scene_loader(
         data_folder=data_folder,
         flag="train",
@@ -119,6 +132,7 @@ def train_single_gpu(
         pred_len=cfg.pred_len,
         obs_len=cfg.obs_len,
     )
+    """
 
     eval_dset, _, eval_loader = scene_loader(
         data_folder=data_folder,
@@ -134,28 +148,39 @@ def train_single_gpu(
         obs_len=cfg.obs_len,
     )
 
-    device = torch.device("cuda:0")
-    torch.cuda.set_device(device)
 
-    model = model_cls(cfg).to(device)
 
-    ckpt_dir = Path("checkpoints/k2")
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    best_ckpt_path = ckpt_dir / f"trial_{trial.number}_best.pt"
+    #model = model_cls(cfg).to(device)
+    print("!!!model_params!!!", sum(p.numel() for p in model.parameters() if p.requires_grad))
 
     if hasattr(model, "rasterizer"):
         print("loading scene layers")
-        path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/" #TODO select scene depending on model
-        scene_contiguous = np.ascontiguousarray(process_maps(model.rasterizer, path), dtype=np.float32)
-        scene = torch.from_numpy(scene_contiguous).unsqueeze(0).to(device)
+
+        path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/"
+        sl = SceneLoader(model.rasterizer)
+
+        scene_contiguous = np.ascontiguousarray(sl.load_scene(path))
+        scene = torch.from_numpy(scene_contiguous).unsqueeze(0).to(device).to(torch.float32)
     else:
         scene = None
+
+    with torch.no_grad():
+        metric = eval_fn(
+            0, 
+            model, 
+            eval_loader, 
+            device, 
+            scene,
+            trial_number=trial.number,
+            config=cfg,
+        )
+    return
 
     total_batches = 0
     num_batches = 0
     eval_step = 0
     loss_sum = 0.0
-    max_batches = 20_000        # 20_000 bei batchsize 64
+    max_batches = 25_000        # 20_000 bei batchsize 64
     batches_per_eval = 1_000    # 1_000
     
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -276,18 +301,18 @@ def make_objective(
     def objective(trial: optuna.Trial):
         # --- general params ---
         batch_size = trial.suggest_categorical("batch_size", [64])
-        lr = trial.suggest_float("lr", 0.0009, 0.0009, log=True)
+        lr = trial.suggest_float("lr", 0.0005, 0.0005, log=True)
         #lr = trial.suggest_float("lr", 1e-5, 5e-3, log=True)
         weight_decay = trial.suggest_float("weight_decay",  4e-06, 4e-06, log=True)
         #weight_decay = trial.suggest_float("weight_decay",  1e-6, 1e-3, log=True)
 
         # --- traisformer params ---
         if (model_choice == "DESIRE"):
-            cfg.hidden_size = trial.suggest_categorical("hidden_size", [256]) #[32, 64, 128, 256])
+            cfg.hidden_size = trial.suggest_categorical("hidden_size", [256, 512]) #[32, 64, 128, 256])
             cfg.out_channels = trial.suggest_categorical("out_channels", [32]) # [8, 16, 32])
             cfg.latent_size = cfg.hidden_size // trial.suggest_categorical("latent_size_factor", [4]) #[8, 4, 2])
             cfg.num_samples = trial.suggest_categorical("num_samples", [2]) #[1,2,5])
-            cfg.num_refine_iters = trial.suggest_categorical("num_refine_iters", [0])
+            cfg.num_refine_iters = trial.suggest_categorical("num_refine_iters", [1])
         try:
             metric = train_single_gpu(
                 model_cls=model_cls,
@@ -334,13 +359,13 @@ def run_worker():
     logging.info(study_name)
 
 
-    if True:
+    if False:
             #"obs_minutes": [1, 5, 10, 15, 20],
         sampler = optuna.samplers.GridSampler({"num_samples": [0]})
         pruner = optuna.pruners.NopPruner()
     else:
         sampler = optuna.samplers.TPESampler(
-            multivariate=True, 
+            multivariate=True,
             constant_liar=True,
         )
         pruner = optuna.pruners.PercentilePruner(
@@ -366,7 +391,7 @@ def run_worker():
 
     cb = trial_jsonl_callback(jsonl_path)
 
-    study.optimize(objective, n_trials=3, gc_after_trial=True, callbacks=[cb])
+    study.optimize(objective, n_trials=1, gc_after_trial=True, callbacks=[cb])
 
     if study.best_trial is not None:
         logging.info(f"BEST value={study.best_value}")
@@ -376,7 +401,8 @@ if __name__ == "__main__":
     run_worker()
 
 """
-
-CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_it_00.db" OPTUNA_STUDY="desire_it_00" OPTUNA_JSONL="desire_it_00.jsonl" python -u src/train/train_tune_desire.py
+# 57_893_615
+# 14_569_327
+CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_tdfdfd.db" OPTUNA_STUDY="desire_t" OPTUNA_JSONL="desire_t.jsonl" python -u src/train/train_tune_desire.py
 
 """

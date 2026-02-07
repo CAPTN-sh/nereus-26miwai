@@ -25,7 +25,6 @@ class TrAISformer(nn.Module):
         self.x_size, self.y_size, sog_size, cog_size, acc_size, rot_size = (
             self.rasterizer.get_total_grid_sizes()
         )
-        print("x,y:", self.x_size, self.y_size)
 
         # state_embd
         self.lat_emb = nn.Embedding(self.x_size, config.n_spatial_embd)
@@ -38,11 +37,10 @@ class TrAISformer(nn.Module):
         #config.n_embd = 2*config.n_spatial_embd + 2*config.n_kinematic_embd + 2*config.n_dynamic_embd
 
         self.scene_cnn = ScenePoolingCNN(in_channels=4)
-        self.terrain_embd = nn.Linear(64, config.n_terrain_embd)
-        self.vessel_embd = nn.Linear(config.n_vessel_feat, config.n_vessel_embd)
-        self.ctx_proj = nn.Linear(config.n_terrain_embd + config.n_vessel_embd, config.n_embd)
+        self.terrain_embd = nn.Linear(64, config.n_embd)
+        self.vessel_embd = nn.Linear(config.n_vessel_feat, config.n_embd)
 
-        self.pos_emb = nn.Parameter(torch.zeros(1, config.obs_len + 1, config.n_embd))
+        self.pos_emb = nn.Parameter(torch.zeros(1, config.obs_len + 2, config.n_embd))
         self.drop = nn.Dropout(config.dropout)
 
         # transformer
@@ -66,9 +64,13 @@ class TrAISformer(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def forward(self, batch, scene=None):
-        obs_feat, obs_pos, _, obs_mask, *_ = batch
-        B, seqlen, _ = obs_pos.size()
+    def forward(self, data, scene=None):
+        ego_idx = data.is_ego.nonzero(as_tuple=True)[0]
+        obs_feat = data.x_raw[ego_idx, :, :]
+        obs_pos = data.x_pos[ego_idx, :, :]
+        static = data.static[ego_idx, :]
+        obs_mask = data.x_mask[ego_idx, :]
+        B, seqlen, _ = obs_pos.shape
 
         # embedding of traj
         x_idx, y_idx = self.rasterizer.pos_to_index(obs_pos)
@@ -82,18 +84,16 @@ class TrAISformer(nn.Module):
         ], dim=-1)
 
         # embedding of context
-        map_embedding = self.terrain_embd(self.scene_cnn(scene)).expand(B, -1)
-        vessel_embedding = self.vessel_embd(obs_feat[:, -1, 4:])
-        context_embedding = torch.cat([map_embedding, vessel_embedding], dim=-1)
-        context_token = self.ctx_proj(context_embedding).unsqueeze(1)
+        map_embedding = self.terrain_embd(self.scene_cnn(scene.unsqueeze(0))).expand(B, -1).unsqueeze(1)
+        vessel_embedding = self.vessel_embd(static).unsqueeze(1)
 
-        tokens = torch.cat([context_token, traj_embeddings], dim=1)
+        tokens = torch.cat([map_embedding, vessel_embedding, traj_embeddings], dim=1)
 
-        position_embeddings = self.pos_emb[:, :seqlen + 1, :]
+        position_embeddings = self.pos_emb[:, :seqlen + 2, :]
         fea = self.drop(tokens + position_embeddings)
 
         ctx_mask = torch.ones(B, 1, device=obs_mask.device, dtype=torch.bool)
-        full_mask = torch.cat([ctx_mask, obs_mask], dim=1)
+        full_mask = torch.cat([ctx_mask, ctx_mask, obs_mask], dim=1)
 
         for blk in self.blocks:
             fea = blk(fea, full_mask)
@@ -102,7 +102,7 @@ class TrAISformer(nn.Module):
         z = fea[:, 0, :]
         logits = self.intent_head(z)
 
-        return {"intent_logits": logits}
+        return logits
 
     def inference(self, batch, scene=None):
         return self.forward(batch, scene), None

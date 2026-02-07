@@ -1,15 +1,16 @@
 from dataclasses import dataclass
 
+from utils.config import STEPS_PER_MINUTE
 
 @dataclass
 class TraisformerParams:
     # Sequence lengths
-    pred_scope: str = "destination" # ["path", "destination"]
-    intent_head = "linear" # "linear", "factorized" "cnn", "mixture", "lowrank"
+    pred_scope: str = "path" # ["path", "destination"]
+    intent_head = "factorized" # "linear", "factorized" "cnn", "mixture", "lowrank"
     k_rank = 16
     
-    pred_len: int = 1 * 12
-    obs_len: int = 10 * 12 # fix at 10min
+    pred_len: int = 20 * STEPS_PER_MINUTE
+    obs_len: int =  10 * STEPS_PER_MINUTE
 
     # bbox
     # TODO from config
@@ -17,20 +18,16 @@ class TraisformerParams:
 
     # Model dims
     n_head: int = 8
-    n_layer: int = 8
+    n_layer: int = 4
 
     # state_embd
-    n_spatial_embd: int = 128
-    n_kinematic_embd: int = 64
-    n_dynamic_embd: int = 32
+    n_embd = 128
+    n_spatial_embd: int = 32
+    n_kinematic_embd: int = 16
+    n_dynamic_embd: int = 16
 
     n_chanels: int = 4
-    n_terrain_embd: int = 64
-
-    n_vessel_feat: int = 7
-    n_vessel_embd: int = 32
-
-    n_embd = 2*128 + 2*64 + 2*32
+    n_vessel_feat: int = 8
 
     # Dropouts
     dropout: float = 0.1
