@@ -3,12 +3,12 @@ import logging
 import os
 from pathlib import Path
 from datetime import datetime
-import time
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.optim as optim
+from torch import amp
 from tqdm import tqdm
 import optuna
 
@@ -16,20 +16,18 @@ from models.desire.model import DESIRE
 from models.desire.nn.loss import loss_desire
 from models.desire.utils.params import DESIREParams
 from models.lstm.loss import mse, eval_lstm
-from models.lstm.model import LSTMModel
 from models.lstm.params import LSTMParams
 from models.traisformer.hierarchical_loss import loss_intent_heatmap, loss_occupancy_heatmap
 from models.traisformer.model import TrAISformer
 from models.traisformer.params import TraisformerParams
 from train.eval_heatmap import eval_heatmap
-from loaders.heatmap_loader.loader import loader_heatmap
-from train.eval import eval, eval_loss
+from loaders.scene_loader.loader import scene_loader
+from train.eval import eval
 from utils.logger import logger
 from train.early_stopper import EarlyStopper
-from models.utils.maps.scene_gernerator import process_maps
-from models.utils.maps.rasterize import Rasterizer
+from models.utils.maps.scene_gernerator import SceneLoader
 
-from utils.config import DATA_FOLDER_PATH, STEPS_PER_MINUTE
+from utils.config import DATA_FOLDER_PATH
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -93,8 +91,6 @@ def train_single_gpu(
 ):
     # One trial = one GPU (the worker process sets CUDA_VISIBLE_DEVICES)
     assert torch.cuda.is_available()
-    device = torch.device("cuda:0")
-    torch.cuda.set_device(device)
 
     print(
         "CUDA_VISIBLE_DEVICES=", os.environ.get("CUDA_VISIBLE_DEVICES"),
@@ -108,34 +104,28 @@ def train_single_gpu(
     trial_settings = {k: round(v, 6) if isinstance(v, float) else v for k, v in trial.params.items()}
     logging.info(f"[Trial {trial.number}] {trial_settings}")
 
-    model = model_cls(cfg).to(device)
-    num_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logging.info(f"Trainable parameters: {num_trainable:,}")
+    device = torch.device("cuda:0")
+    torch.cuda.set_device(device)
 
-    if num_trainable > 2_500_000:
-        logging.info(f"[TrialPruned] Parameter budget exceeded: {num_trainable:,}")
-        raise optuna.exceptions.TrialPruned()
+    """
+    best_ckpt_path = "checkpoints/trial_0_best.pt"
+
+
     
-    if num_trainable < 1_250_000:
-        logging.info(f"[TrialPruned] Below 50% of Parameter budget: {num_trainable:,}")
-        raise optuna.exceptions.TrialPruned()
+    ckpt = torch.load(best_ckpt_path, map_location=device)
+    cfg = ckpt["config"]
+    print(cfg.num_samples)
+    cfg.num_samples = 5
+    
+    model.to(device)
+    model.load_state_dict(ckpt["model_state_dict"])
+    model.eval()
+    """
+    model = DESIRE(cfg)
 
-    feat_cols = ["speed", "course"]
-    train_dset, _, train_loader = loader_heatmap(
-        data_folder=data_folder,
-        flag="train",
-        min_date=pd.Timestamp("2022-01-01"),
-        max_date=pd.Timestamp("2024-01-01"),
-        world_size=1,
-        rank=0,
-        batch_size=batch_size,
-        pin_memory=True,
-        feat_cols=feat_cols,
-        fut_len=cfg.pred_len,
-        obs_len=cfg.obs_len,
-    )
+    feat_cols = ["speed", "course", "acc", "angular_difference", "length", "width", "ship_group", "hour_of_day"]
 
-    eval_dset, _, eval_loader = loader_heatmap(
+    train_dset, _, train_loader = scene_loader(
         data_folder=data_folder,
         flag="val",
         min_date=pd.Timestamp("2022-01-01"),
@@ -145,22 +135,46 @@ def train_single_gpu(
         batch_size=batch_size,
         pin_memory=True,
         feat_cols=feat_cols,
-        fut_len=cfg.pred_len,
+        pred_len=cfg.pred_len,
         obs_len=cfg.obs_len,
     )
 
-    path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/"
-    my_rasterizer = Rasterizer([10.12, 54.31, 10.33, 54.46])
+    eval_dset, _, eval_loader = scene_loader(
+        data_folder=data_folder,
+        flag="val",
+        min_date=pd.Timestamp("2022-01-01"),
+        max_date=pd.Timestamp("2024-01-01"),
+        world_size=1,
+        rank=0,
+        batch_size=batch_size,
+        pin_memory=True,
+        feat_cols=feat_cols,
+        pred_len=cfg.pred_len,
+        obs_len=cfg.obs_len,
+    )
 
-    scene_contiguous = np.ascontiguousarray(process_maps(my_rasterizer, path))
-    scene = torch.from_numpy(scene_contiguous).unsqueeze(0).to(device).to(torch.float32)
+
+
+    #model = model_cls(cfg).to(device)
+    print("!!!model_params!!!", sum(p.numel() for p in model.parameters() if p.requires_grad))
+
+    if hasattr(model, "rasterizer"):
+        print("loading scene layers")
+
+        path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/"
+        sl = SceneLoader(model.rasterizer)
+
+        scene_contiguous = np.ascontiguousarray(sl.load_scene(path))
+        scene = torch.from_numpy(scene_contiguous).unsqueeze(0).to(device).to(torch.float32)
+    else:
+        scene = None
 
     total_batches = 0
     num_batches = 0
+    eval_step = 0
     loss_sum = 0.0
-    max_batches = 20_000
-    batches_per_eval = 1_000
-    max_seconds = 60 * 60 * 1
+    max_batches = 25_000        # 20_000 bei batchsize 64
+    batches_per_eval = 1_000    # 1_000
     
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -168,20 +182,17 @@ def train_single_gpu(
     warmup_lambda = lambda step: min(1.0, (step + 1) / warmup_batches)
     warmup_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_lambda)
 
-    """
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        factor=0.1,
-        patience=4,
-        cooldown=2,
+        optimizer, 
+        factor=0.2, 
+        patience=3,
+        cooldown=1,
         min_lr=1e-6,
     )
-    """
 
-    stopper = EarlyStopper(patience=5, min_delta=1e-4)
+    stopper = EarlyStopper(patience=10, min_delta=1e-4)
     best_metric = float("inf")
 
-    start_time = time.perf_counter()
     for epoch in range(num_epochs):
         train_loader.sampler.set_epoch(epoch)
         model.train()
@@ -191,7 +202,7 @@ def train_single_gpu(
 
             batch = [t.to(device, non_blocking=True) for t in batch]
             output = model(batch, scene)
-            loss, _loss_dict = loss_fn(output, batch, config=cfg)
+            loss, _loss_dict = loss_fn(output, batch, eval_step, config=cfg)
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -213,6 +224,7 @@ def train_single_gpu(
                 num_batches = 0
                 loss_sum = 0.0
 
+                model.eval()
                 with torch.no_grad():
                     metric = eval_fn(
                         eval_step, 
@@ -223,29 +235,40 @@ def train_single_gpu(
                         trial_number=trial.number,
                         config=cfg,
                     )
+
                 model.train()
 
-                metric = float(metric)
-                best_metric = min(best_metric, metric)
-                # scheduler.step(metric)
+                if metric < best_metric:
+                    best_metric = metric
+                    torch.save(
+                        {
+                            "model_state_dict": model.state_dict(),
+                            "optimizer_state_dict": optimizer.state_dict(),
+                            "scheduler_state_dict": scheduler.state_dict(),
+                            "metric": best_metric,
+                            "eval_step": eval_step,
+                            "config": cfg,
+                        },
+                        best_ckpt_path,
+                    )
+                    logging.info(
+                        f"[Eval Step {eval_step}] New best metric={best_metric:.6f} → saved model"
+                    )
+                #scheduler.step(metric)
                 
                 # report to Optuna (so pruning can work)
                 trial.report(best_metric, step=eval_step)
                 trial.set_user_attr("epochs_ran", eval_step)
                 if trial.should_prune():
-                    logging.info(f"[TrialPruned] PercentilePruner")
                     raise optuna.TrialPruned()
 
+                # local early stopping based on *current val metric*
                 if (total_batches > warmup_batches):
                     if stopper.step(metric):
-                        logging.info(f"[Eval Step {eval_step}] Early stopping : best={stopper.best:.6f}")
+                        logging.info(f"[Eval Step {eval_step}] Early stopping: best={stopper.best:.6f}")
                         break
                 if (total_batches >= max_batches):
-                    logging.info(f"[Eval Step {eval_step}] Trajectory budget exceeded: best={stopper.best:.6f}")
-                    break
-
-                if time.perf_counter() - start_time > max_seconds:
-                    logging.info(f"[Eval Step {eval_step}] Time budget exceeded: best={stopper.best:.6f}")
+                    logging.info(f"[Eval Step {eval_step}] Late stopping: best={stopper.best:.6f}")
                     break
 
         if stopper.stop or (total_batches >= max_batches):
@@ -260,63 +283,18 @@ def make_objective(
     # pick model
     if model_choice == "DESIRE":
         model_cls, cfg, loss_fn, eval_fn = DESIRE, DESIREParams(), loss_desire, eval
-    elif model_choice == "LSTM":
-        model_cls, cfg, loss_fn, eval_fn = LSTMModel, LSTMParams(), mse, eval_lstm
-    elif model_choice == "TRAISFORMER":
-        model_cls, cfg, loss_fn, eval_fn = (
-            TrAISformer,
-            TraisformerParams(),
-            loss_occupancy_heatmap if pred_scope == "path" else loss_intent_heatmap,
-            eval_heatmap,
-        )
     else:
         raise ValueError(f"Unknown model_choice: {model_choice}")
 
     def objective(trial: optuna.Trial):
-        if (model_choice == "LSTM"):
-            lr = trial.suggest_categorical("lr",  [1e-4, 5e-4, 1e-3, 3e-3])
-            weight_decay = trial.suggest_categorical("weight_decay",  [1e-6, 1e-5, 1e-4])
-            hidden_size = trial.suggest_categorical("hidden_size", [1024]) #256, 512, 
-            cfg.rnn_hidden_size = hidden_size
-            cfg.rnn_hidden_size = hidden_size
+        # --- general params ---
+        batch_size = trial.suggest_categorical("batch_size", [64])
+        lr = trial.suggest_float("lr", 0.0005, 0.0005, log=True)
+        #lr = trial.suggest_float("lr", 1e-5, 5e-3, log=True)
+        weight_decay = trial.suggest_float("weight_decay",  4e-06, 4e-06, log=True)
+        #weight_decay = trial.suggest_float("weight_decay",  1e-6, 1e-3, log=True)
 
         # --- traisformer params ---
-        if (model_choice == "TRAISFORMER"):
-            cfg.intent_head = trial.suggest_categorical("head", ["lowrank", "factorized", "mixture"])
-            cfg.k_rank = trial.suggest_categorical("k_rank", [8, 16, 32])
-
-            cfg.n_embd = trial.suggest_categorical("n_embd", [128, 256])
-            cfg.n_layer = trial.suggest_categorical("n_layer", [2, 4, 6, 8])
-            cfg.n_head = trial.suggest_categorical("n_head", [4, 8])
-
-            #lr = trial.suggest_float("lr", 1e-5, 1e-3, log=True)
-            #weight_decay = trial.suggest_float("weight_decay",  1e-6, 1e-4, log=True)
-
-            lr = trial.suggest_float("lr", 2e-4, 2e-4, log=True)      # 5e-05/1e-4
-            weight_decay = trial.suggest_float("weight_decay",  5e-5, 5e-5, log=True) # 5e-5/1e-5
-
-            cfg.pred_scope = pred_scope
-            logging.info(f"pred_scope={pred_scope}")
-
-            if pred_scope == "path":
-                cfg.pred_len = 20 * STEPS_PER_MINUTE
-            cfg.pred_len = 20 * STEPS_PER_MINUTE
-            
-            cfg.dropout = trial.suggest_float("dropout", 0.1, 0.1, step=0.05) # 0.0, 0.3
-            cfg.attn_dropout = trial.suggest_float("attn_dropout", 0.1, 0.1, step=0.05) #0.0, 0.2
-            cfg.coarse_loss_beta = trial.suggest_categorical("coarse_loss_beta", [1.0]) #[0.0, 0.5, 1.0, 2.0])   # 2.0/0.0
-
-            cfg.n_spatial_embd = cfg.n_embd // 4
-            cfg.n_kinematic_embd = cfg.n_embd // 8
-            cfg.n_dynamic_embd = cfg.n_embd // 8
-
-            cfg.n_terrain_embd = cfg.n_embd // 4
-            cfg.n_vessel_embd = cfg.n_embd // 8
-
-        # --- general params ---
-        batch_size = trial.suggest_categorical("batch_size", [512])
-        cfg.obs_len = 10 * STEPS_PER_MINUTE
-
         try:
             metric = train_single_gpu(
                 model_cls=model_cls,
@@ -362,30 +340,16 @@ def run_worker():
     logger(file_prefix=f"optuna_worker_{model_choice}")
     logging.info(study_name)
 
-    """
-    cnn:
-    2026-01-28 20:30:22,353 - INFO - Trainable parameters: 1,585,297
-    2026-01-28 20:30:22,354 - INFO - Trainable parameters head: 688,481
 
-    2026-01-28 20:31:44,392 - INFO - Trainable parameters: 2,427,316
-    2026-01-28 20:31:44,392 - INFO - Trainable parameters head: 1,530,500
-    """
-
-    if True:
-        sampler = optuna.samplers.GridSampler({
-            "head": ["lowrank", "factorized", "mixture"],
-            "k_rank": [8, 16, 32],
-            "n_layer": [2, 4, 6, 8],
-            "n_head": [4, 8],
-            "n_embd": [128, 256],
-        })
+    if False:
+            #"obs_minutes": [1, 5, 10, 15, 20],
+        sampler = optuna.samplers.GridSampler({"num_samples": [0]})
         pruner = optuna.pruners.NopPruner()
     else:
         sampler = optuna.samplers.TPESampler(
             multivariate=True,
             constant_liar=True,
         )
-
         pruner = optuna.pruners.PercentilePruner(
             percentile=75.0,
             n_startup_trials=10,
@@ -404,12 +368,12 @@ def run_worker():
     objective = make_objective(
         model_choice=model_choice,
         data_folder=data_folder,
-        pred_scope = "destination", # "path" "destination"
+        pred_scope = "path", # "path" "destination"
     )
 
     cb = trial_jsonl_callback(jsonl_path)
 
-    study.optimize(objective, n_trials=400, gc_after_trial=True, callbacks=[cb])
+    study.optimize(objective, n_trials=1, gc_after_trial=True, callbacks=[cb])
 
     if study.best_trial is not None:
         logging.info(f"BEST value={study.best_value}")
@@ -419,20 +383,8 @@ if __name__ == "__main__":
     run_worker()
 
 """
-[Experiment 1] Best observation length for short and long term
-CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///obs_trais_dest_256.db" OPTUNA_STUDY="obs_trais_dest_256" OPTUNA_JSONL="obs_trais_dest_256.jsonl" python -u src/train/train_tune.py
-CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///obs_trais_dest_256.db" OPTUNA_STUDY="obs_trais_dest_256" OPTUNA_JSONL="obs_trais_dest_256.jsonl" python -u src/train/train_tune.py
-CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///obs_lstm.db" OPTUNA_STUDY="obs_lstm" OPTUNA_JSONL="obs_lstm.jsonl" python -u src/train/train_tune.py
+# 57_893_615
+# 14_569_327
+CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_tdfdfd.db" OPTUNA_STUDY="desire_t" OPTUNA_JSONL="desire_t.jsonl" python -u src/train/train_tune_desire_scene.py
 
-[Experiment 2] LSTM:
-CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///lstm_rel.db" OPTUNA_STUDY="lstm_rel" OPTUNA_JSONL="lstm_rel.jsonl" python -u src/train/train_tune.py
-
-[Experiment 3] TrAISfromer:
-26_419_428
-dest 3.717
-path 5.872
-CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///dest_trais_head.db" OPTUNA_STUDY="dest_trais_head" OPTUNA_JSONL="dest_trais_head.jsonl" python -u src/train/train_tune.py
-CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///path_trais_head.db" OPTUNA_STUDY="path_trais_head" OPTUNA_JSONL="path_trais_head.jsonl" python -u src/train/train_tune.py
-
-CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///obs_len_lstm_512.db" OPTUNA_STUDY="obs_len_lstm_512" OPTUNA_JSONL="obs_len_lstm_512.jsonl" python -u src/train/train_tune.py
 """

@@ -69,7 +69,7 @@ def eval_heatmap(
                 B, _, x_bins, y_bins = logits.shape
 
                 if config.pred_scope == "path":
-                    target = rasterize_occupancy(batch.y_pos, batch.y_mask)
+                    target = batch.y_heatmap
                 if config.pred_scope == "destination":
                     fin_pos = batch.fin_pos[batch.fin_pos_mask]
                     target = rasterize_destination(fin_pos)

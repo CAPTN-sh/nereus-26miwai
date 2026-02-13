@@ -25,27 +25,22 @@ class IOC(nn.Module):
         self.score_fc = nn.Linear(_h, 1)
         self.delta_fc = nn.Linear(_h, _out)
 
-    def forward(self, pred_pos_rel, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats):
-        # pred_traj_rel: [B,K,2,T]; prev_hidden: [B,Hx]; obs_pos_t0/obs_last: [B,2]
-        device = pred_pos_rel.device
-        B, K, C, T = pred_pos_rel.shape
+    def forward(self, pred_pos_rel, hidden_obs, data, scene_feats):
+        N, K, T, C = pred_pos_rel.shape
+        H = hidden_obs.size(-1)
 
-        # expand over the K samples
-        obs_pos_last = obs_pos_last[:, None, :].expand(-1, K, -1).reshape(B * K, C).unsqueeze(-1)
-        seq_start_end = (seq_start_end * K).to(device).long()
-        h0 = hidde_obs_enc[:, None, :].expand(-1, K, -1).reshape(B * K, -1)
+        obs_pos_last = data.x_pos[:, -1].unsqueeze(1).expand(-1, K, -1)
+        pred_pos_abs = obs_pos_last.unsqueeze(2) + pred_pos_rel.cumsum(dim=2) * 100.0
+
+        h0 = hidden_obs.unsqueeze(1).expand(-1, K, -1)
+        h0_proj = h0.unsqueeze(2).expand(-1, -1, T, -1)
+        scf_seq = self.scf.forward(h0_proj, pred_pos_abs, pred_pos_rel, data, scene_feats)
+        scf_seq = scf_seq.reshape(N*K, T, -1)
         
-        # build absolute coords
-        pred_pos_rel = pred_pos_rel.reshape(B * K, C, T)
-        pred_pos_abs = obs_pos_last + pred_pos_rel.cumsum(dim=-1) * 100.0
-        
-        h0_proj = h0.unsqueeze(1).expand(-1, T, -1)
-        scf_seq = self.scf.forward_vectorized(h0_proj, pred_pos_abs, pred_pos_rel, seq_start_end, scene_feats)
-        h_seq, _ = self.gru(scf_seq, h0.unsqueeze(0)) 
+        h_seq, _ = self.gru(scf_seq, h0.reshape(N*K, H).unsqueeze(0))
         h_last = h_seq[:, -1]
-        
-        acc_scores = self.score_fc(h_seq).squeeze(-1).sum(dim=1)
-        acc_scores = acc_scores.view(B, K)
-        pred_delta = self.delta_fc(h_last).view(B, K, C, T)
+
+        acc_scores = self.score_fc(h_seq).squeeze(-1).sum(dim=1).view(N, K)
+        pred_delta = self.delta_fc(h_last).view(N, K, T, C)
 
         return acc_scores, pred_delta

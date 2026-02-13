@@ -7,10 +7,11 @@ import torch
 from tqdm import tqdm
 from collections import defaultdict
 from torch_geometric.data import Data, Dataset
-from torch_geometric.loader import DataLoader
-from datetime import datetime
+from models.traisformer.params import TraisformerParams
+from models.utils.maps.rasterize import Rasterizer
 
 from utils.config import SHIP_DB_PATH, STEPS_PER_MINUTE, STEP_SIZE, DATA_FOLDER_PATH
+RASTER = Rasterizer(TraisformerParams().bbox)
 
 def process_time(df: pd.DataFrame, min_date: pd.Timestamp, max_date: pd.Timestamp) -> pd.DataFrame:
     df = (
@@ -51,28 +52,14 @@ class GraphTrajectoryDataset(Dataset):
         self,
         nodes_path: Path,
         edges_path: Path,
-        flag: str,
         min_date: pd.Timestamp,
         max_date: pd.Timestamp,
         obs_len=60,
         pred_len=30,
         min_len_in_minutes=1,
-        force_rebuild=False,
         max_edge_dist=500,
     ):
         super(GraphTrajectoryDataset, self).__init__()
-
-        cach_foder = Path("data/cache_folder/graph")
-        cache_key = f"sl_{min_date.date()}_{max_date.date()}_{obs_len}_{pred_len}_{flag}_{max_edge_dist}"
-        cache_path = cach_foder / f"gl_{cache_key}.pt"
-
-        if cache_path.exists() and not force_rebuild:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] loading from cache")
-            cache = torch.load(cache_path, map_location="cpu", weights_only=False)
-            self.__dict__.update(cache)
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] finished loading")
-            return
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] building new cache")
 
         self.coords = pyproj.Transformer.from_crs(
             pyproj.CRS("EPSG:4326"), 
@@ -169,6 +156,16 @@ class GraphTrajectoryDataset(Dataset):
         }
 
         #### EDGES ####
+        if max_edge_dist == 0:
+            for traj_id, traj in tqdm(nodes.groupby("traj_id"), desc="Nodes"):
+                for cur_t in traj.index[self.min_valid_window:-self.min_valid_window]:
+                    self.items.append((cur_t, traj_id, []))
+
+                feat = traj[["rel_x", "rel_y"] + node_feat_cols].to_numpy(dtype=np.float32)
+                padded_feat = np.pad(feat, ((self.l_pad, self.r_pad), (0, 0)), mode='constant')
+                self.feat_map[traj_id] = padded_feat
+            return
+        
         edges_all = pd.read_parquet(edges_path)
         edges_all = process_time(edges_all, min_date, max_date)
         edges = edges_all[edges_all["dist"] <= max_edge_dist]
@@ -216,32 +213,6 @@ class GraphTrajectoryDataset(Dataset):
             time, traj_id, traj_id_other = row[:3]
             self.edge_map[(time, traj_id)][traj_id_other] = row[3:]
 
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] saving new cache")
-
-        cach_foder.mkdir(parents=True, exist_ok=True)
-        torch.save(
-            {
-                "items":self.items,
-                "t0":self.t0,
-                "pos_map":self.pos_map,
-                "feat_map":self.feat_map,
-                "raw_map":self.raw_map,
-                "edge_map":self.edge_map,
-                "static_map":self.static_map,
-                "fin_pos_mask":self.fin_pos_mask,
-                "obs_len":self.obs_len,
-                "pred_len":self.pred_len,
-                "l_pad":self.l_pad,
-                "r_pad":self.r_pad,
-                "num_node_feats":self.num_node_feats,
-                "num_edge_feats":self.num_edge_feats,
-                "num_static_feats":self.num_static_feats,
-            },
-            cache_path,
-        )
-
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] finished saving cache")
-
 
     def __len__(self):
         return len(self.items)
@@ -279,11 +250,17 @@ class GraphTrajectoryDataset(Dataset):
 
         t = self.l_pad + cur_t-t0
 
+        valid_end = len(pos) - self.r_pad
         fut_pos = [pos[t:t+self.pred_len]]
         fut_rel_pos = [feat[t:t+self.pred_len, :2]]
-        fut_mask = [np.arange(t, t + self.pred_len) < (len(pos) - self.r_pad)]
+        fut_mask = [np.arange(t, t + self.pred_len) < valid_end]
         fin_pos = [pos[-(self.r_pad + 1)]]
         fin_pos_mask = [self.fin_pos_mask[target_id]]
+
+        if self.pred_len == 0:
+            y_heatmap = self.rasterize_occupancy(torch.from_numpy(pos[t:valid_end]))
+        else:
+            y_heatmap = self.rasterize_occupancy(torch.from_numpy(pos[t:min(t+self.pred_len, valid_end)]))
 
         edge_index = [[],[]]
         edge_attr = []
@@ -322,41 +299,30 @@ class GraphTrajectoryDataset(Dataset):
             y_mask=torch.from_numpy(np.asarray(fut_mask)).bool(),
             fin_pos=torch.from_numpy(np.asarray(fin_pos)).float(),
             fin_pos_mask=torch.from_numpy(np.asarray(fin_pos_mask)).bool(),
-            is_ego = is_ego,
+            is_ego=is_ego,
+            y_heatmap=y_heatmap,
         )
 
         return data
     
     def _pad(self, x):
         return np.pad(x, ((self.l_pad, self.r_pad), (0, 0)), mode='constant')
+    
+    def rasterize_occupancy(self, fut_pos):
+        """
+        Renders multiple future positions into a single occupancy grid.
+        """
+        x_bins, y_bins, *_ = RASTER.get_total_grid_sizes()
 
+        x_idx = torch.floor((fut_pos[:, 0] - RASTER.x_min) / RASTER.pos_res).to(torch.int64)
+        y_idx = torch.floor((fut_pos[:, 1] - RASTER.y_min) / RASTER.pos_res).to(torch.int64)
+        
+        x_idx = x_idx.clamp(0, x_bins - 1)
+        y_idx = y_idx.clamp(0, y_bins - 1)
 
-if __name__ == "__main__":
+        grid = torch.zeros((x_bins, y_bins))
+        
+        grid[x_idx, y_idx] = 1.0
+        grid = grid / (grid.sum() + 1e-8)
 
-    data_folder = DATA_FOLDER_PATH / "ais/4_features/fh_10/kiel"
-    file_name = f"fh_{data_folder.name}_val"
-
-    dset = GraphTrajectoryDataset(
-        nodes_path=data_folder / f"{file_name}_ship_features.parquet",
-        edges_path=data_folder / f"{file_name}_ship2ship_features.parquet",
-        flag="val",
-        min_date=pd.Timestamp("2022-01-01"),
-        max_date=pd.Timestamp("2023-01-01"),
-        pred_len=30,
-        obs_len=60,
-        force_rebuild=True,
-    )
-
-    loader = DataLoader(
-        dset,
-        batch_size=64,
-        num_workers=4,
-        shuffle=True,
-        pin_memory=False,
-        prefetch_factor=4,
-        persistent_workers=False,
-        drop_last=True,
-    )
-
-    for batch in tqdm(loader):
-        a = 0
+        return grid

@@ -2,70 +2,26 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models.nereus.scene import ScenePoolingCNN
 from models.nereus.params import NEREUSParams
-from models.nereus.rnn import LSTMEncoder, LSTMDecoder
+from models.utils.rnn import GRUEncoder, GRUDecoder
 from torch_geometric.data import Data
-from models.utils.maps.rasterize import Rasterizer
 
-class NEREUS(nn.Module):
-    def __init__(
-            self, 
-            config: NEREUSParams, 
-            social_module = None, 
-            map_module = None, 
-            prior_module = None,
-        ):
+
+class RNN(nn.Module):
+    def __init__(self, config: NEREUSParams):
         super().__init__()
-        self.rasterizer = Rasterizer(config.bbox)
-        module_count = 2
+        self.encoder = GRUEncoder(config.rnn_hidden_size, config.node_feat_dim)
+        self.h_proj = nn.Linear(config.rnn_hidden_size, config.rnn_hidden_size)
+        self.decoder = GRUDecoder(config)
+        
 
-        # ENCODER
-        self.encoder = LSTMEncoder(config)
-        self.enc_proj = nn.Linear(config.enc_hidden_size, config.dec_hidden_size)
-
-        # DECODER
-        self.w = nn.Parameter(torch.tensor([1.0] * module_count))
-        self.dropout_layer = nn.Dropout(0.1)
-        self.decoder = MDNDecoder(config)
-
-    def forward(self, data: Data, maps=None):
+    def forward(self, data: Data, scene=None):
         ego_idx = data.is_ego.nonzero(as_tuple=True)[0]
-        B = ego_idx.shape[0]
-        abs_pos = data.x_pos[ego_idx, -1, :]
-        rel_pos_t0 = data.x[ego_idx, -1:, :2]
 
-        h_stack = []
+        h = self.encoder(data.x[ego_idx], data.x_mask[ego_idx])
+        h = self.h_proj(h).unsqueeze(0)
 
-        h_enc_all = self.encoder(data)
-        h_enc = self.enc_proj(h_enc_all[ego_idx])
-        h_stack.append(h_enc.unsqueeze(0))
+        y = data.x[:, -1:, :2]
+        preds = self.decoder(y, h)
 
-        h_static = self.static_proj(data.static[ego_idx, :])
-        h_stack.append(h_static.unsqueeze(0))
-
-        if self.social_module:
-            h_gnn = self.social_module(h_enc_all, data.edge_index, data.edge_attr)
-            h_gnn = self.gnn_proj(h_gnn[ego_idx])
-            h_stack.append(h_gnn.unsqueeze(0))
-
-        if self.map_module:
-            maps_v = maps.unsqueeze(0).expand(B, -1, -1, -1)
-            h_map = self.map_cnn(maps_v, abs_pos)
-            h_map = self.map_proj(h_map)
-            h_stack.append(h_map.unsqueeze(0))
-
-        if self.prior_module:
-            with torch.no_grad():
-                #prior_map = self.prior_module(data).unsqueeze(1) # Density / Cluster
-                prior_map = self.prior_module(data, maps)
-            h_prior = self.prior_cnn(prior_map, abs_pos)
-            h_prior = self.prior_proj(h_prior)
-            h_stack.append(h_prior.unsqueeze(0))
-
-        w = torch.softmax(self.w, dim=0)
-        h_stack = torch.stack([torch.tanh(h) for h in h_stack], dim=0)
-        h = torch.sum(w.view(-1, 1, 1, 1) * h_stack, dim=0)
-        h = self.dropout_layer(h)
-
-        return self.decoder(rel_pos_t0, h)
+        return preds

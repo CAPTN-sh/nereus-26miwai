@@ -27,20 +27,18 @@ class TrAISformer(nn.Module):
         )
 
         # state_embd
-        self.lat_emb = nn.Embedding(self.x_size, config.n_spatial_embd)
-        self.lon_emb = nn.Embedding(self.y_size, config.n_spatial_embd)
-        self.sog_emb = nn.Embedding(sog_size, config.n_kinematic_embd)
-        self.cog_emb = nn.Embedding(cog_size, config.n_kinematic_embd)
-        self.acc_emb = nn.Embedding(acc_size, config.n_dynamic_embd)
-        self.rot_emb = nn.Embedding(rot_size, config.n_dynamic_embd)
+        self.lat_emb = nn.Embedding(self.x_size, config.n_embd // 4)
+        self.lon_emb = nn.Embedding(self.y_size, config.n_embd // 4)
+        self.sog_emb = nn.Embedding(sog_size, config.n_embd // 8)
+        self.cog_emb = nn.Embedding(cog_size, config.n_embd // 8)
+        self.acc_emb = nn.Embedding(acc_size, config.n_embd // 8)
+        self.rot_emb = nn.Embedding(rot_size, config.n_embd // 8)
 
-        #config.n_embd = 2*config.n_spatial_embd + 2*config.n_kinematic_embd + 2*config.n_dynamic_embd
+        #self.scene_cnn = ScenePoolingCNN(in_channels=4)
+        #self.terrain_embd = nn.Linear(64, config.n_embd)
+        #self.vessel_embd = nn.Linear(config.n_vessel_feat, config.n_embd)
 
-        self.scene_cnn = ScenePoolingCNN(in_channels=4)
-        self.terrain_embd = nn.Linear(64, config.n_embd)
-        self.vessel_embd = nn.Linear(config.n_vessel_feat, config.n_embd)
-
-        self.pos_emb = nn.Parameter(torch.zeros(1, config.obs_len + 2, config.n_embd))
+        self.pos_emb = nn.Parameter(torch.zeros(1, config.obs_len, config.n_embd)) #  + 2
         self.drop = nn.Dropout(config.dropout)
 
         # transformer
@@ -84,22 +82,22 @@ class TrAISformer(nn.Module):
         ], dim=-1)
 
         # embedding of context
-        map_embedding = self.terrain_embd(self.scene_cnn(scene.unsqueeze(0))).expand(B, -1).unsqueeze(1)
-        vessel_embedding = self.vessel_embd(static).unsqueeze(1)
+        #map_embedding = self.terrain_embd(self.scene_cnn(scene.unsqueeze(0))).expand(B, -1).unsqueeze(1)
+        #vessel_embedding = self.vessel_embd(static).unsqueeze(1)
 
-        tokens = torch.cat([map_embedding, vessel_embedding, traj_embeddings], dim=1)
+        #tokens = torch.cat([map_embedding, vessel_embedding, traj_embeddings], dim=1)
 
-        position_embeddings = self.pos_emb[:, :seqlen + 2, :]
-        fea = self.drop(tokens + position_embeddings)
+        position_embeddings = self.pos_emb[:, :seqlen, :] #  + 2
+        fea = self.drop(traj_embeddings + position_embeddings) # tokens
 
-        ctx_mask = torch.ones(B, 1, device=obs_mask.device, dtype=torch.bool)
-        full_mask = torch.cat([ctx_mask, ctx_mask, obs_mask], dim=1)
+        #ctx_mask = torch.ones(B, 1, device=obs_mask.device, dtype=torch.bool)
+        #full_mask = torch.cat([ctx_mask, ctx_mask, obs_mask], dim=1)
 
         for blk in self.blocks:
-            fea = blk(fea, full_mask)
+            fea = blk(fea, obs_mask) # full_mask
         fea = self.ln_f(fea)
 
-        z = fea[:, 0, :]
+        z = fea[:, -1, :] # 0
         logits = self.intent_head(z)
 
         return logits

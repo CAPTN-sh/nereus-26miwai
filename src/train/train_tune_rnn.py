@@ -12,8 +12,8 @@ import torch.optim as optim
 from tqdm import tqdm
 import optuna
 
-from models.nereus.rnn import LSTM
-from models.nereus.loss import loss, eval, mdn_loss, eval_mdn
+from models.lstm.model import RNN
+from models.nereus.loss import loss, eval
 from models.nereus.params import NEREUSParams
 from loaders.graph_loader.loader import graph_loader
 from utils.logger import logger
@@ -123,7 +123,7 @@ def train_single_gpu(
         pin_memory=True,
         pred_len=cfg.pred_len,
         obs_len=cfg.obs_len,
-        max_edge_dist = cfg.gnn_max_dist,
+        max_edge_dist = 0,
     )
 
     eval_loader, _ = graph_loader(
@@ -135,7 +135,7 @@ def train_single_gpu(
         pin_memory=True,
         pred_len=cfg.pred_len,
         obs_len=cfg.obs_len,
-        max_edge_dist = cfg.gnn_max_dist,
+        max_edge_dist = 0,
     )
 
     total_batches = 0
@@ -237,7 +237,7 @@ def train_single_gpu(
 def make_objective(data_folder: Path):
 
     def objective(trial: optuna.Trial):
-        model_cls, cfg, loss_fn, eval_fn = LSTM, NEREUSParams(), loss, eval
+        model_cls, cfg, loss_fn, eval_fn = RNN, NEREUSParams(), loss, eval
 
         # general params
         lr = trial.suggest_categorical("lr", [1e-3])
@@ -245,9 +245,8 @@ def make_objective(data_folder: Path):
         batch_size = 512
 
         # GNN
-        hidden = trial.suggest_categorical("hidden_size", [384, 512])
-        cfg.enc_hidden_size = hidden
-        cfg.dec_hidden_size = hidden
+        cfg.obs_len = trial.suggest_categorical("obs_len_min", [1, 5, 10, 15, 20]) * STEPS_PER_MINUTE
+        cfg.rnn_hidden_size = trial.suggest_categorical("hidden_size", [128])
 
         try:
             metric = train_single_gpu(
@@ -276,7 +275,8 @@ def run_worker():
     All workers share the same Optuna storage to coordinate trials.
     """
     grid = {
-        "hidden_size": [384, 512],
+        "obs_len_min": [1, 5, 10, 15, 20],
+        "hidden_size": [128],
     }
 
     torch.backends.cudnn.benchmark = True
@@ -322,7 +322,7 @@ def run_worker():
 
     cb = trial_jsonl_callback(jsonl_path)
 
-    study.optimize(objective, n_trials=50, gc_after_trial=True, callbacks=[cb])
+    study.optimize(objective, n_trials=1, gc_after_trial=True, callbacks=[cb])
 
     if study.best_trial is not None:
         logging.info(f"BEST value={study.best_value}")
@@ -335,7 +335,7 @@ if __name__ == "__main__":
 [Experiment 1] Best observation length for short and long term
 
 # encoder decoder
-CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=LSTM OPTUNA_STORAGE="sqlite:///nereus_lstm.db" OPTUNA_STUDY="nereus_lstm" OPTUNA_JSONL="nereus_lstm.jsonl" python -u src/train/train_tune_lstm.py
+CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=RNN OPTUNA_STORAGE="sqlite:///rnn_obs_len_128.db" OPTUNA_STUDY="rnn_obs_len" OPTUNA_JSONL="rnn_obs_len.jsonl" python -u src/train/train_tune_rnn.py
 
 
 CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=NEREUS OPTUNA_STORAGE="sqlite:///nereus_ed_big.db" OPTUNA_STUDY="nereus_ed_big" OPTUNA_JSONL="nereus_ed_big.jsonl" python -u src/train/train_tune_nereus.py

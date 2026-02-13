@@ -121,7 +121,7 @@ def train_single_gpu(
     #    logging.info(f"[TrialPruned] Parameter budget exceeded: {num_trainable:,}")
     #    raise optuna.exceptions.TrialPruned()
 
-    train_loader, train_dset = graph_loader(
+    train_loader, _ = graph_loader(
         data_folder=data_folder,
         flag="train",
         min_date=pd.Timestamp("2022-01-01"),
@@ -130,7 +130,7 @@ def train_single_gpu(
         pin_memory=True,
         pred_len=cfg.pred_len,
         obs_len=cfg.obs_len,
-        max_edge_dist = 10,
+        max_edge_dist = 0,
     )
 
     eval_loader, _ = graph_loader(
@@ -142,15 +142,15 @@ def train_single_gpu(
         pin_memory=True,
         pred_len=cfg.pred_len,
         obs_len=cfg.obs_len,
-        max_edge_dist = 10,
+        max_edge_dist = 0,
     )
 
     total_batches = 0
     num_batches = 0
     loss_sum = 0.0
-    max_batches = 250_000
+    max_batches = 25_000
     batches_per_eval = 1_000
-    max_seconds = 60 * 60 * 10
+    max_seconds = 60 * 60 * 1
     
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -158,6 +158,7 @@ def train_single_gpu(
     warmup_lambda = lambda step: min(1.0, (step + 1) / warmup_batches)
     warmup_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_lambda)
 
+    """
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         factor=0.1,
@@ -165,8 +166,9 @@ def train_single_gpu(
         cooldown=2,
         min_lr=1e-6,
     )
+    """
 
-    stopper = EarlyStopper(patience=15, min_delta=1e-4)
+    stopper = EarlyStopper(patience=5, min_delta=1e-4)
     best_metric = float("inf")
 
     start_time = time.perf_counter()
@@ -215,6 +217,7 @@ def train_single_gpu(
                 metric = float(metric)
                 if metric < best_metric:
                     best_metric = metric
+                    """
                     torch.save(
                         {
                             "model_state_dict": model.state_dict(),
@@ -230,6 +233,7 @@ def train_single_gpu(
                         f"[Eval Step {eval_step}] New best metric={best_metric:.6f} → saved model"
                     )
                 scheduler.step(metric)
+                """
                 
                 # report to Optuna (so pruning can work)
                 trial.report(best_metric, step=eval_step)
@@ -262,20 +266,15 @@ def make_objective(
         model_cls, cfg, loss_fn, eval_fn = (
             TrAISformer,
             TraisformerParams(),
-            loss_intent_heatmap,
+            loss_occupancy_heatmap,
             eval_heatmap,
         )
-        # general params
-        # "n_layer": 4, "n_head": 8, "n_embd": 256, "coarse_loss_beta": 0.0
-        lr = trial.suggest_categorical("lr", [2e-4])
-        weight_decay = 5e-5
+        lr = trial.suggest_categorical("lr", [5e-4])
+        weight_decay = 1e-4
         batch_size = 512
 
-        cfg.pred_scope = "destination"
-
-        cfg.n_layer = trial.suggest_categorical("n_layer", [6])
-        cfg.n_head = trial.suggest_categorical("n_head", [8])
-        cfg.k_rank = trial.suggest_categorical("k_rank", [8])
+        cfg.obs_len = trial.suggest_categorical("obs_len_min", [1, 5, 10, 15, 20]) * STEPS_PER_MINUTE
+        cfg.n_embd = trial.suggest_categorical("n_embd", [64, 128, 256])
 
         try:
             metric = train_single_gpu(
@@ -304,10 +303,8 @@ def run_worker():
     All workers share the same Optuna storage to coordinate trials.
     """
     grid = {
-        "lr": [2e-4],
-        "n_layer": [6],
-        "n_head": [8],
-        "k_rank": [8],
+        "obs_len_min": [1, 5, 10, 15, 20],
+        "n_embd": [64, 128, 256],
     }
 
     torch.backends.cudnn.benchmark = True
@@ -353,7 +350,7 @@ def run_worker():
 
     cb = trial_jsonl_callback(jsonl_path)
 
-    study.optimize(objective, n_trials=1, gc_after_trial=True, callbacks=[cb])
+    study.optimize(objective, n_trials=10, gc_after_trial=True, callbacks=[cb])
 
     if study.best_trial is not None:
         logging.info(f"BEST value={study.best_value}")
@@ -366,7 +363,10 @@ if __name__ == "__main__":
 [Experiment 1] Best observation length for short and long term
 
 # traisformer
-CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///trais_path.db" OPTUNA_STUDY="trais_path" OPTUNA_JSONL="trais_path.jsonl" python -u src/train/train_tune_traisformer.py
+CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///trais_obs.db" OPTUNA_STUDY="trais_obs" OPTUNA_JSONL="trais_obs.jsonl" python -u src/train/train_tune_traisformer.py
+
+
+
 CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///trais_dest.db" OPTUNA_STUDY="trais_dest" OPTUNA_JSONL="trais_dest.jsonl" python -u src/train/train_tune_traisformer.py
 
 """

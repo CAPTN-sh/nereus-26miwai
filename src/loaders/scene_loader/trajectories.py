@@ -98,7 +98,7 @@ class SceneTrajectoryDataset(Dataset):
         obs_len=60,
         pred_len=30,
         min_len_in_minutes=1,
-        force_rebuild=False
+        force_rebuild=True
     ):
         super(SceneTrajectoryDataset, self).__init__()
         self.obs_len = obs_len
@@ -208,7 +208,7 @@ class SceneTrajectoryDataset(Dataset):
         pos_rel_all = np.concatenate(self.pos_rel, axis=0)
         
         cache_dir.mkdir(parents=True, exist_ok=True)
-
+        return
         def flush_array(array, path):
             mm = np.memmap(path, dtype="float32", mode="w+", shape=array.shape)
             mm[:] = array
@@ -281,8 +281,13 @@ class SceneTrajectoryDataset(Dataset):
         return obs_feat, obs_pos, obs_pos_rel, obs_mask, fut_pos, fut_pos_rel, fut_mask
 
     def _to_tensor(self, traj, dtype=torch.float32):
-        # traj: list of numpy arrays [T, C] -> tensor [N, C, T]
-        return torch.from_numpy(np.stack(traj, axis=0)).to(dtype).permute(0, 2, 1)
+        arr = np.stack(traj, axis=0)
+
+        # If channel dim collapsed (N, T) → (N, T, 1)
+        if arr.ndim == 2:
+            arr = arr[:, :, None]
+
+        return torch.from_numpy(arr).to(dtype).permute(0, 2, 1)
     
     def _pad(self, x):
         return np.pad(x, ((self.l_pad, self.r_pad), (0, 0)), mode='constant')

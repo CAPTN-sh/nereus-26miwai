@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 
 from models.desire.nn.cvae import CVAEEncoder
-from models.desire.nn.rnn import RNNDecoder, RNNEncoder
+from models.desire.nn.rnn import GRUDecoder
+from models.utils.rnn import GRUEncoder
 from models.desire.utils.params import DESIREParams
 
 
@@ -16,68 +17,74 @@ class SGM(nn.Module):
     def __init__(self, params: DESIREParams):
         super().__init__()
         self.pred_len = params.pred_len
+        self.pred_dim = params.pred_dim
+
         self.hidden_size = params.hidden_size
         self.latent_size = params.latent_size
         self.num_samples = params.num_samples
 
-        self.enc_obs = RNNEncoder(params, kernel_size=3, input_dim = params.pred_dim + params.obs_feat_dim)
-        self.enc_fut = RNNEncoder(params, kernel_size=1, input_dim = params.pred_dim)
+        self.enc_obs = GRUEncoder(params.hidden_size, params.kin_dim)
+        self.enc_fut = GRUEncoder(params.hidden_size, params.pred_dim)
 
         self.cvae = CVAEEncoder(params)
         self.beta_fc = nn.Linear(self.latent_size, self.hidden_size, bias=True)
 
-        self.dec = RNNDecoder(params)
+        self.dec = GRUDecoder(params) #TODO use utils
 
-    def forward(self, obs_feat: torch.Tensor, obs_pos_rel: torch.Tensor, obs_mask: torch.Tensor, fut_pos_rel: torch.Tensor, fut_mask: torch.Tensor):
-        device = obs_pos_rel.device
-        B = fut_pos_rel.shape[0]
-
-        obs = torch.cat([obs_feat, obs_pos_rel], dim=1)
-        hidde_obs_enc = self.enc_obs(obs, obs_mask)[-1]
-        hidde_fut_enc = self.enc_fut(fut_pos_rel, fut_mask)[-1]
-
-        # sample k times
-        mean, log_var = self.cvae(hidde_fut_enc, hidde_obs_enc)
-        std = (0.5 * log_var).exp().unsqueeze(1)
-        eps = torch.randn(B, self.num_samples, self.latent_size, device=device)
-        z_k = mean.unsqueeze(1) + std * eps
-
-        pred_pos_rel = self.generate_traj(hidde_obs_enc, z_k, B, device)
-        return pred_pos_rel, hidde_obs_enc, mean, log_var
-
-    def inference(self, obs_feat: torch.Tensor, obs_pos_rel: torch.Tensor, obs_mask: torch.Tensor):
-        device = obs_pos_rel.device
-        B = obs_pos_rel.size(0)
+    def forward(self, data):
+        device = data.x.device
+        N = data.x.shape[0]
         K = self.num_samples
-        L = self.latent_size
 
-        # Encode observed
-        obs = torch.cat([obs_feat, obs_pos_rel], dim=1)
-        hidde_obs_enc = self.enc_obs(obs, obs_mask)[-1]
+        ego_idx = data.is_ego.nonzero(as_tuple=True)[0]
 
-        # Sample z_k ~ N(0,I) for prior
-        z_k = torch.randn(B, K, L, device=device)
-        mean = torch.zeros(B, K, L, device=device)
-        log_var = torch.zeros(B, K, L, device=device)
+        hidden_obs = self.enc_obs(data.x, data.x_mask)
+        hidden_fut = self.enc_fut(data.y_rel_pos, data.y_mask)
 
-        pred_pos_rel = self.generate_traj(hidde_obs_enc, z_k, B, device)
-        return pred_pos_rel, hidde_obs_enc, mean, log_var
+        mean_ego, log_var_ego = self.cvae(hidden_fut, hidden_obs[ego_idx])
 
-    def generate_traj(self, hidde_obs_enc, z_k, B, device):
-        # guided drop out
-        beta = torch.softmax(self.beta_fc(z_k), dim=-1)
-        x_t0 = hidde_obs_enc.unsqueeze(1) * beta
+        std = (0.5 * log_var_ego).exp()
+        eps = torch.randn(mean_ego.size(0), K, self.latent_size, device=device)
 
-        # Decoding
-        zeros_tail = torch.zeros(
-            B * self.num_samples, self.pred_len - 1, self.hidden_size, device=device
-        )
-        x_t0 = x_t0.view(B * self.num_samples, 1, self.hidden_size).contiguous()
-        x_seq = torch.cat([x_t0, zeros_tail], dim=1)
+        z_ego = mean_ego.unsqueeze(1) + std.unsqueeze(1) * eps
+        z_all = torch.randn(N, K, self.latent_size, device=device)
+        z_all[ego_idx] = z_ego
 
-        pred_pos_rel, _ = self.dec(x_seq)
-        pred_pos_rel = pred_pos_rel.view(
-            B, self.num_samples, 2, self.pred_len
-        ).contiguous()
+        pred_pos_rel = self.generate_traj(hidden_obs, z_all)
+
+        return pred_pos_rel, hidden_obs, mean_ego, log_var_ego
+    
+    def inference(self, data):
+
+        device = data.x.device
+        N = data.x.shape[0]
+        K = self.num_samples
+
+        hidden_obs = self.enc_obs(data.x, data.x_mask)
+
+        z_all = torch.randn(N, K, self.latent_size, device=device)
+
+        pred_pos_rel = self.generate_traj(hidden_obs, z_all)
+
+        mean = torch.zeros(K, self.latent_size, device=device)
+        log_var = torch.zeros(K, self.latent_size, device=device)
+
+        return pred_pos_rel, hidden_obs, mean, log_var
+    
+    def generate_traj(self, hidden_all, z):
+        N, K, _ = z.shape
+        H = self.hidden_size
+
+        # guided dropout
+        beta = torch.softmax(self.beta_fc(z), dim=-1)
+
+        # TODO condition on static features
+        x_t0 = hidden_all.unsqueeze(1) * beta
+        x_t0 = x_t0.view(1, N * K, H)
+
+        dec_in = torch.zeros(N * K, self.pred_len, H, device=x_t0.device)
+
+        pred_pos_rel, _ = self.dec(dec_in, x_t0)
+        pred_pos_rel = pred_pos_rel.view(N, K, self.pred_len, self.pred_dim)
 
         return pred_pos_rel

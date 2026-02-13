@@ -23,7 +23,6 @@ def graph_loader(
     dset = GraphTrajectoryDataset(
         nodes_path=data_folder / f"{file_name}_ship_features.parquet",
         edges_path=data_folder / f"{file_name}_ship2ship_features.parquet",
-        flag=flag,
         min_date=min_date,
         max_date=max_date,
         pred_len=pred_len,

@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch
 
 from models.desire.IOC import IOC
 from models.desire.nn.scene_pooling import ScenePoolingCNN
@@ -20,44 +21,40 @@ class DESIRE(nn.Module):
         self.IOC = IOC(params, self.rasterizer)
         
 
-    def forward(self, batch, scene):
-        obs_feat, obs_pos, obs_pos_rel, obs_mask, fut_pos, fut_pos_rel, fut_mask, seq_start_end = batch
-        obs_pos_last = obs_pos[:, :, -1]
-
+    def forward(self, data, scene=None):
         scene_feats = self.CNN(scene).squeeze(0)
 
-        pred_pos_rel, hidde_obs_enc, mean, log_var = self.SGM(obs_feat, obs_pos_rel, obs_mask, fut_pos_rel, fut_mask)
+        pred_pos_rel, hidde_obs_enc, mean, log_var = self.SGM(data)
 
         # IOC: scores + per-step Δ for each hypothesis
-        iod_params = (pred_pos_rel, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats)
+        iod_params = (pred_pos_rel, hidde_obs_enc, data, scene_feats)
         pred_pos_rel_best, pred_pos_rel_refined, scores = self.IOD_iteration(*iod_params)
 
-        return pred_pos_rel_best, pred_pos_rel, pred_pos_rel_refined, mean, log_var, scores
+        ego_idx = data.is_ego.nonzero(as_tuple=True)[0]
+        return pred_pos_rel_best, pred_pos_rel[ego_idx], pred_pos_rel_refined, mean, log_var, scores
 
-    def inference(self, batch, scene):
-        obs_feat, obs_pos, obs_pos_rel, obs_mask, fut_pos, fut_pos_rel, fut_mask, seq_start_end = batch
-        obs_pos_last = obs_pos[:, :, -1]
-
+    def inference(self, data, scene=None):
         scene_feats = self.CNN(scene).squeeze(0)
 
         # SGM: sample K hypotheses
-        pred_pos_rel, hidde_obs_enc, mean, log_var = self.SGM.inference(obs_feat, obs_pos_rel, obs_mask)
+        pred_pos_rel, hidde_obs_enc, _, _ = self.SGM.inference(data)
         
         # IOC: scores + per-step Δ for each hypothesis
-        iod_params = (pred_pos_rel, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats)
+        iod_params = (pred_pos_rel, hidde_obs_enc, data, scene_feats)
         pred_pos_rel_best, pred_pos_rel_refined, scores = self.IOD_iteration(*iod_params)
 
         return pred_pos_rel_best, pred_pos_rel_refined
     
-    def IOD_iteration(self, pred_pos_rel, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats):
+    def IOD_iteration(self, pred_pos_rel, hidde_obs_enc, data, scene_feats):
 
         Y = pred_pos_rel
         for _ in range(self.num_refine_iters):
-            _, delta = self.IOC(Y, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats)
+            _, delta = self.IOC(Y, hidde_obs_enc, data, scene_feats)
             Y = Y + delta
-        scores, _ = self.IOC(Y, hidde_obs_enc, obs_pos_last, seq_start_end, scene_feats)
+        scores, _ = self.IOC(Y, hidde_obs_enc, data, scene_feats)
 
-        best_idx = scores.argmax(dim=1).view(-1, 1, 1, 1).expand(-1, 1, 2, self.pred_len)
-        pred_pos_rel_best = Y.gather(1, best_idx).squeeze(1)
+        best_idx = scores.argmax(dim=1)
+        pred_pos_rel_best = Y[torch.arange(Y.size(0), device=Y.device), best_idx]
 
-        return pred_pos_rel_best, Y, scores
+        ego_idx = data.is_ego.nonzero(as_tuple=True)[0]
+        return pred_pos_rel_best[ego_idx], Y[ego_idx], scores[ego_idx]

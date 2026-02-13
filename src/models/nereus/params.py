@@ -13,9 +13,7 @@ class NEREUSParams:
     edge_feat_dim: int = 25
     static_feat_dim: int = 8
 
-    enc_n_layers: int = 2
-    enc_hidden_size: int = 384
-    dec_hidden_size: int = 384
+    rnn_hidden_size: int = 384
 
     gnn_hidden_size: int = 128
     gnn_n_head: int = 4

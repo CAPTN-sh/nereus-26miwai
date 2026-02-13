@@ -11,9 +11,9 @@ import torch_scatter as ts
 class GAT(nn.Module):
     def __init__(self, config: NEREUSParams):
         super().__init__()
-        self.pre_gnn_norm = nn.LayerNorm(config.enc_hidden_size)
+        self.pre_gnn_norm = nn.LayerNorm(config.rnn_hidden_size)
         self.gnn = GATConv(
-            in_channels=config.enc_hidden_size,
+            in_channels=config.rnn_hidden_size,
             out_channels=config.gnn_hidden_size,
             heads=config.gnn_n_head,
             edge_dim=config.edge_feat_dim,
@@ -147,9 +147,9 @@ class EgoSocialPooling(nn.Module):
         super().__init__()
 
         self.social_pool = SocialPoolFast(config)
-        self.pre_norm = nn.LayerNorm(config.enc_hidden_size)
+        self.pre_norm = nn.LayerNorm(config.rnn_hidden_size)
         self.proj = nn.Linear(
-            config.enc_hidden_size,
+            config.rnn_hidden_size,
             config.gnn_hidden_size
         )
 

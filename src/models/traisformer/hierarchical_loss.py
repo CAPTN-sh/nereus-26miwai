@@ -96,9 +96,7 @@ def loss_occupancy_heatmap(
     log_probs_fine = F.log_softmax(logits.view(B, -1), dim=1)
     
     # 2. Ground Truth & Normalization
-    fut_pos = data.y_pos
-    fut_mask = data.y_mask
-    target_fine = rasterize_occupancy(fut_pos, fut_mask) # (B, H, W)
+    target_fine = data.y_heatmap.view(B, 1, H, W)
     target_flat = target_fine.view(B, -1)
 
     # 3. Fine-Resolution Loss (Categorical Cross Entropy)
@@ -111,7 +109,7 @@ def loss_occupancy_heatmap(
     probs_coarse = F.avg_pool2d(probs_fine_2d, kernel_size=pool_size) * (pool_size**2)
     
     # Pool binary target and normalize into a coarse PDF
-    target_coarse = F.avg_pool2d(target_fine.unsqueeze(1), kernel_size=pool_size) * (pool_size**2)
+    target_coarse = F.avg_pool2d(target_fine, kernel_size=pool_size) * (pool_size**2)
     target_coarse_flat = target_coarse.view(B, -1)
 
     # Coarse Loss using log of pooled probabilities

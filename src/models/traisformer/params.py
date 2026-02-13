@@ -7,9 +7,9 @@ class TraisformerParams:
     # Sequence lengths
     pred_scope: str = "path" # ["path", "destination"]
     intent_head = "factorized" # "linear", "factorized" "cnn", "mixture", "lowrank"
-    k_rank = 16
+    k_rank = 8
     
-    pred_len: int = 20 * STEPS_PER_MINUTE
+    pred_len: int = 0 * STEPS_PER_MINUTE
     obs_len: int =  10 * STEPS_PER_MINUTE
 
     # bbox
@@ -17,14 +17,11 @@ class TraisformerParams:
     bbox = [10.12, 54.31, 10.33, 54.46]
 
     # Model dims
-    n_head: int = 8
-    n_layer: int = 4
+    n_head: int = 4
+    n_layer: int = 3
 
     # state_embd
     n_embd = 128
-    n_spatial_embd: int = 32
-    n_kinematic_embd: int = 16
-    n_dynamic_embd: int = 16
 
     n_chanels: int = 4
     n_vessel_feat: int = 8
