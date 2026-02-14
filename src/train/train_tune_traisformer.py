@@ -65,6 +65,7 @@ def trial_jsonl_callback(jsonl_path: Path):
             "trial_number": trial.number,
             "epochs_ran": trial.user_attrs.get("epochs_ran", None),
             "state": trial.state.name,
+            "n_model_params": trial.user_attrs.get("n_model_params", None),
             "value": trial.value,
             "params": formatted_params,
             "cuda_device": os.environ.get("CUDA_VISIBLE_DEVICES", None),
@@ -114,12 +115,13 @@ def train_single_gpu(
     scene = torch.from_numpy(scene_contiguous).to(device).to(torch.float32)
 
     model = model_cls(cfg).to(device)
-    num_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logging.info(f"Trainable parameters: {num_trainable:,}")
+    n_model_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    trial.set_user_attr("n_model_params", n_model_params)
+    logging.info(f"Trainable parameters: {n_model_params:,}")
 
-    #if num_trainable > 10_000_000:
-    #    logging.info(f"[TrialPruned] Parameter budget exceeded: {num_trainable:,}")
-    #    raise optuna.exceptions.TrialPruned()
+    if n_model_params > 3_100_000:
+        logging.info(f"[TrialPruned] Parameter budget exceeded: {n_model_params:,}")
+        raise optuna.exceptions.TrialPruned()
 
     train_loader, _ = graph_loader(
         data_folder=data_folder,
@@ -254,7 +256,7 @@ def train_single_gpu(
                     logging.info(f"[Eval Step {eval_step}] Time budget exceeded: best={stopper.best:.6f}")
                     break
 
-        if stopper.stop or (total_batches >= max_batches):
+        if stopper.stop or (total_batches >= max_batches) or (time.perf_counter() - start_time > max_seconds):
             break
     return best_metric
 
@@ -269,12 +271,21 @@ def make_objective(
             loss_occupancy_heatmap,
             eval_heatmap,
         )
-        lr = trial.suggest_categorical("lr", [5e-4])
+        #cfg.intent_head = trial.suggest_categorical("intent_head", ["factorized"])
+
+
+
+        # "factorized" -> 30, "cnn" -> 24, "mixture" -> 26, "lowrank" -> 25, upsample 
+        cfg.intent_head = trial.suggest_categorical("intent_head", ["factorized", "cnn", "mixture", "lowrank"])
+        cfg.k_rank = trial.suggest_categorical("k_rank", [i for i in range(50)])
+
+        lr = trial.suggest_categorical("lr", [3e-4])
         weight_decay = 1e-4
         batch_size = 512
 
-        cfg.obs_len = trial.suggest_categorical("obs_len_min", [1, 5, 10, 15, 20]) * STEPS_PER_MINUTE
-        cfg.n_embd = trial.suggest_categorical("n_embd", [64, 128, 256])
+        cfg.n_embd = trial.suggest_categorical("n_embd", [128])
+        cfg.n_layer = trial.suggest_categorical("n_layer", [3])
+        cfg.n_head = trial.suggest_categorical("n_head", [4])
 
         try:
             metric = train_single_gpu(
@@ -302,10 +313,17 @@ def run_worker():
     One worker process. It sees exactly ONE GPU because launcher sets CUDA_VISIBLE_DEVICES.
     All workers share the same Optuna storage to coordinate trials.
     """
-    grid = {
-        "obs_len_min": [1, 5, 10, 15, 20],
-        "n_embd": [64, 128, 256],
-    }
+    
+    # 1,243,712
+    # "factorized" -> 30, "cnn" -> 45, "mixture" -> 26, "lowrank" -> 25  -> 3 / 1.8
+    # "factorized" -> 18, "cnn" -> 35, "mixture" -> 16, "lowrank" -> 15  -> 2.10 / 0.9
+    # "factorized" -> 12, "cnn" -> 29, "mixture" -> 11, "lowrank" -> 10  -> 1.65 / 0.45
+    
+    grid = {"intent_head": ["factorized"], "k_rank": [30, 18, 12]}
+    grid = {"intent_head": ["cnn"], "k_rank": [45, 35, 29]}
+    #grid = {"intent_head": ["mixture"], "k_rank": [26, 16, 11]}
+    #grid = {"intent_head": ["lowrank"], "k_rank": [25, 15, 10]}
+
 
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -350,7 +368,7 @@ def run_worker():
 
     cb = trial_jsonl_callback(jsonl_path)
 
-    study.optimize(objective, n_trials=10, gc_after_trial=True, callbacks=[cb])
+    study.optimize(objective, n_trials=50, gc_after_trial=True, callbacks=[cb])
 
     if study.best_trial is not None:
         logging.info(f"BEST value={study.best_value}")
@@ -363,10 +381,12 @@ if __name__ == "__main__":
 [Experiment 1] Best observation length for short and long term
 
 # traisformer
-CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///trais_obs.db" OPTUNA_STUDY="trais_obs" OPTUNA_JSONL="trais_obs.jsonl" python -u src/train/train_tune_traisformer.py
+CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///trais_head.db" OPTUNA_STUDY="trais_head" OPTUNA_JSONL="trais_head.jsonl" python -u src/train/train_tune_traisformer.py
 
+CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///trais_head.db" OPTUNA_STUDY="trais_head" OPTUNA_JSONL="trais_head.jsonl" python -u src/train/train_tune_traisformer.py
 
+CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///trais_head.db" OPTUNA_STUDY="trais_head" OPTUNA_JSONL="trais_head.jsonl" python -u src/train/train_tune_traisformer.py
 
-CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///trais_dest.db" OPTUNA_STUDY="trais_dest" OPTUNA_JSONL="trais_dest.jsonl" python -u src/train/train_tune_traisformer.py
+CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///trais_head.db" OPTUNA_STUDY="trais_head" OPTUNA_JSONL="trais_head.jsonl" python -u src/train/train_tune_traisformer.py
 
 """

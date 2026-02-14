@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 class LinearHead(nn.Module):
     # Approach 0
-    def __init__(self, n_embd, x_size, y_size):
+    def __init__(self, n_embd, x_size, y_size, k_rank = None):
         super().__init__()
         self.x_size = x_size
         self.y_size = y_size
@@ -52,17 +52,15 @@ class FactorizedHead(nn.Module):
     
 class CNNHead(nn.Module):
     # Approach 2
-    def __init__(self, n_embd, x_size, y_size, k_rank = 8):
+    def __init__(self, n_embd, x_size, y_size, k_rank = 30):
         super().__init__()
-        self.h, self.w = k_rank, k_rank
+        self.h, self.w = int(x_size * k_rank/100), int(y_size * k_rank/100)
 
-        self.proj = nn.Linear(n_embd, 32 * self.h * self.w)
+        self.proj = nn.Linear(n_embd, self.h * self.w)
         self.decoder = nn.Sequential(
-            nn.Conv2d(32, 16, 3, padding=1),
-            nn.Upsample(scale_factor=128//k_rank, mode="bilinear", align_corners=False),
-            nn.Conv2d(16, 1, 3, padding=1),
-            nn.ReLU(),
+            nn.Conv2d(1, 1, 3, padding=1),
             nn.Upsample(size=(x_size, y_size), mode="bilinear", align_corners=False),
+            nn.Conv2d(1, 1, 3, padding=1),
         )
 
     def forward(self, z):

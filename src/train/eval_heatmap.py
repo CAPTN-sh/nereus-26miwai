@@ -12,7 +12,6 @@ from models.traisformer.hierarchical_loss import (
     loss_intent_heatmap,
     rasterize_destination,
     loss_occupancy_heatmap,
-    rasterize_occupancy,
 )
 from train.plot_heatmap import plot_heatmap
 
