@@ -96,7 +96,7 @@ def eval(
 
     with torch.inference_mode():
         for data in tqdm(eval_loader, desc="Evaluating (heat maps)"):
-            if num_batches >= 500:
+            if num_batches >= 1000:
                 break
 
             num_batches += 1
@@ -191,7 +191,7 @@ def eval_mdn(
 
     with torch.inference_mode():
         for i, data in enumerate(tqdm(eval_loader, desc="Evaluating (MDN)")):
-            if i >= 500:
+            if i >= 1000:
                 break
 
             data = data.to(device, non_blocking=True)

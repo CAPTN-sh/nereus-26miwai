@@ -64,7 +64,7 @@ def eval_lstm(
 
     with torch.inference_mode():
         for batch in tqdm(eval_loader, desc="Evaluating (heat maps)"):
-            if num_batches >= 500:
+            if num_batches >= 1000:
                 break
 
             num_batches += 1

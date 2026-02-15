@@ -7,7 +7,7 @@ class TraisformerParams:
     # Sequence lengths
     pred_scope: str = "path" # ["path", "destination"]
     intent_head = "factorized" # "linear", "factorized" "cnn", "mixture", "lowrank"
-    k_rank = 8
+    k_rank = 15
     
     pred_len: int = 0 * STEPS_PER_MINUTE
     obs_len: int =  10 * STEPS_PER_MINUTE

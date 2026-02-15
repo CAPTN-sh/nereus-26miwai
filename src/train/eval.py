@@ -63,7 +63,7 @@ def eval(epoch, model: nn.Module, eval_loader: DataLoader, device, scene, trial_
 
     with torch.inference_mode():
         for data in tqdm(eval_loader, desc="Evaluating"):
-            if n_batches >= 500:
+            if n_batches >= 1000:
                 break
             data = data.to(device)
             n_batches += 1
@@ -101,4 +101,4 @@ def eval(epoch, model: nn.Module, eval_loader: DataLoader, device, scene, trial_
 
     model.train()
 
-    return ade
+    return ade_k
