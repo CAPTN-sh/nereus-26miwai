@@ -9,7 +9,7 @@ class DESIREParams:
     obs_len: int = 10 * STEPS_PER_MINUTE
     pred_len: int = 5 * STEPS_PER_MINUTE
 
-    num_refine_iters: int = 1
+    num_refine_iters: int = 2
     hidden_size: int = 256
     intermediate_size: int = 32
 
@@ -19,11 +19,12 @@ class DESIREParams:
 
     # sgm
     kin_dim = 8
-    latent_size: int = 16
-    num_samples: int = 1
+    static_feat_dim = 8
+    latent_size: int = 32
+    num_samples: int = 2
 
     # social pooling
     num_rings: int = 6
     num_wedges: int = 6
     rmin: int = 5
-    max_dist: int = 500
+    max_dist: int = 1000

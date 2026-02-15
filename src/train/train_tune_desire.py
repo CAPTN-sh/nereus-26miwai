@@ -63,6 +63,7 @@ def trial_jsonl_callback(jsonl_path: Path):
             "trial_number": trial.number,
             "epochs_ran": trial.user_attrs.get("epochs_ran", None),
             "state": trial.state.name,
+            "n_model_params": trial.user_attrs.get("n_model_params", None),
             "value": trial.value,
             "params": formatted_params,
             "cuda_device": os.environ.get("CUDA_VISIBLE_DEVICES", None),
@@ -108,16 +109,17 @@ def train_single_gpu(
     scene = torch.from_numpy(scene_contiguous).to(device).to(torch.float32)
 
     model = model_cls(cfg).to(device)
-    num_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logging.info(f"Trainable parameters: {num_trainable:,}")
+    n_model_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    trial.set_user_attr("n_model_params", n_model_params)
+    logging.info(f"Trainable parameters: {n_model_params:,}")
 
-    #if num_trainable > 10_000_000:
-    #    logging.info(f"[TrialPruned] Parameter budget exceeded: {num_trainable:,}")
-    #    raise optuna.exceptions.TrialPruned()
+    if n_model_params > 5_000_000:
+        logging.info(f"[TrialPruned] Parameter budget exceeded: {n_model_params:,}")
+        raise optuna.exceptions.TrialPruned()
 
     train_loader, train_dset = graph_loader(
         data_folder=data_folder,
-        flag="val",
+        flag="train",
         min_date=pd.Timestamp("2022-01-01"),
         max_date=pd.Timestamp("2024-01-01"),
         batch_size=batch_size,
@@ -231,7 +233,7 @@ def train_single_gpu(
                     logging.info(f"[Eval Step {eval_step}] Time budget exceeded: best={stopper.best:.6f}")
                     break
 
-        if stopper.stop or (total_batches >= max_batches):
+        if stopper.stop or (total_batches >= max_batches) or (time.perf_counter() - start_time > max_seconds):
             break
     return best_metric
 
@@ -243,12 +245,14 @@ def make_objective(data_folder: Path):
         # general params
         batch_size = 512
         weight_decay = 1e-4
-        lr = trial.suggest_categorical("lr", [1e-3]) #[2e-4, 5e-4, 1e-3, 2e-3])
+        lr = trial.suggest_categorical("lr", [1e-3])
 
-        cfg.hidden_size = trial.suggest_categorical("hidden_size", [256]) #[128, 256, 384])
-        cfg.latent_size = trial.suggest_categorical("latent_size", [16]) #[8, 16, 32])
-        cfg.out_channels = trial.suggest_categorical("out_channels", [16]) #[16, 32])
-        cfg.max_dist = trial.suggest_categorical("max_dist", [500]) #[500, 1000, 2000])
+        cfg.hidden_size = trial.suggest_categorical("hidden_size", [256])
+        cfg.latent_size = trial.suggest_categorical("latent_size", [16])
+        cfg.out_channels = trial.suggest_categorical("out_channels", [16])
+        cfg.max_dist = trial.suggest_categorical("max_dist", [10, 500, 1000, 2000]) #[500, 1000, 2000])
+        cfg.num_refine_iters = trial.suggest_categorical("num_refine_iters", [2])
+        cfg.num_samples = trial.suggest_categorical("num_samples", [4])
 
         try:
             metric = train_single_gpu(
@@ -277,7 +281,7 @@ def run_worker():
     All workers share the same Optuna storage to coordinate trials.
     """
     grid = {
-        "lr": [5e-4],
+        "max_dist": [10] #500, 1000, 2000]
     }
 
     torch.backends.cudnn.benchmark = True
@@ -295,7 +299,7 @@ def run_worker():
     logger(file_prefix=f"optuna_worker_{model_choice}")
     logging.info(study_name)
 
-    if False:
+    if True:
         sampler = optuna.samplers.GridSampler(grid)
         pruner = optuna.pruners.NopPruner()
     else:
@@ -336,6 +340,6 @@ if __name__ == "__main__":
 [Experiment 1] Best observation length for short and long term
 
 # encoder decoder
-CUDA_VISIBLE_DEVICES=2 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_dim.db" OPTUNA_STUDY="desire_dim" OPTUNA_JSONL="desire_dim.jsonl" python -u src/train/train_tune_desire.py
+CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_dist_10.db" OPTUNA_STUDY="desire_dist_10" OPTUNA_JSONL="desire_dist_10.jsonl" python -u src/train/train_tune_desire.py
 
 """

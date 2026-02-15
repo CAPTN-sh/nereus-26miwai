@@ -257,10 +257,9 @@ class GraphTrajectoryDataset(Dataset):
         fin_pos = [pos[-(self.r_pad + 1)]]
         fin_pos_mask = [self.fin_pos_mask[target_id]]
 
+        y_heatmap = []
         if self.pred_len == 0:
             y_heatmap = self.rasterize_occupancy(torch.from_numpy(pos[t:valid_end]))
-        else:
-            y_heatmap = self.rasterize_occupancy(torch.from_numpy(pos[t:min(t+self.pred_len, valid_end)]))
 
         edge_index = [[],[]]
         edge_attr = []

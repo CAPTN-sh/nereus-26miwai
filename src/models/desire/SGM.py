@@ -31,6 +31,8 @@ class SGM(nn.Module):
 
         self.dec = GRUDecoder(params) #TODO use utils
 
+        self.static_fc = nn.Linear(params.static_feat_dim, self.hidden_size)
+
     def forward(self, data):
         device = data.x.device
         N = data.x.shape[0]
@@ -50,7 +52,7 @@ class SGM(nn.Module):
         z_all = torch.randn(N, K, self.latent_size, device=device)
         z_all[ego_idx] = z_ego
 
-        pred_pos_rel = self.generate_traj(hidden_obs, z_all)
+        pred_pos_rel = self.generate_traj(hidden_obs, z_all, data.static)
 
         return pred_pos_rel, hidden_obs, mean_ego, log_var_ego
     
@@ -64,22 +66,21 @@ class SGM(nn.Module):
 
         z_all = torch.randn(N, K, self.latent_size, device=device)
 
-        pred_pos_rel = self.generate_traj(hidden_obs, z_all)
+        pred_pos_rel = self.generate_traj(hidden_obs, z_all, data.static)
 
-        mean = torch.zeros(K, self.latent_size, device=device)
-        log_var = torch.zeros(K, self.latent_size, device=device)
-
-        return pred_pos_rel, hidden_obs, mean, log_var
+        return pred_pos_rel, hidden_obs, None, None
     
-    def generate_traj(self, hidden_all, z):
+    def generate_traj(self, hidden_all, z, static):
         N, K, _ = z.shape
         H = self.hidden_size
+
+        # condition on static features
+        static_cond = self.static_fc(static).unsqueeze(1)
 
         # guided dropout
         beta = torch.softmax(self.beta_fc(z), dim=-1)
 
-        # TODO condition on static features
-        x_t0 = hidden_all.unsqueeze(1) * beta
+        x_t0 = hidden_all.unsqueeze(1) * beta + static_cond
         x_t0 = x_t0.view(1, N * K, H)
 
         dec_in = torch.zeros(N * K, self.pred_len, H, device=x_t0.device)
