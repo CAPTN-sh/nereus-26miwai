@@ -21,24 +21,23 @@ class GAT(nn.Module):
         )
         self.dropout_layer = nn.Dropout(0.1)
 
-    def forward(self, h_enc, edge_index, edge_attr):
-
+    def forward(self, h_enc, data):
         h_enc_norm = self.pre_gnn_norm(h_enc)
-        h_gnn = self.gnn(h_enc_norm, edge_index, edge_attr)
+        h_gnn = self.gnn(h_enc_norm, data.edge_index, data.edge_attr)
         h_gnn = self.dropout_layer(h_gnn)
 
         return h_gnn
 
 
 class SocialPoolFast(nn.Module):
-    def __init__(self, params):
+    def __init__(self, config: NEREUSParams):
         super().__init__()
 
         self.num_rings = 6
         self.num_wedges = 6
 
         self.register_buffer("rmin", torch.tensor(5.0))
-        self.register_buffer("rmax", torch.tensor(500.0))
+        self.register_buffer("rmax", torch.tensor(config.max_dist))
         self.register_buffer("two_pi", torch.tensor(2.0 * torch.pi))
 
     def forward(self, y_pred, hidden, ego_idx, edge_index):

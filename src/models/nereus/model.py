@@ -12,20 +12,24 @@ class NEREUS(nn.Module):
     def __init__(
             self, 
             config: NEREUSParams, 
+            static_module: bool = True,
             social_module = None, 
             map_module = None, 
             prior_module = None,
         ):
         super().__init__()
         self.rasterizer = Rasterizer(config.bbox)
-        module_count = 2
 
         # ENCODER
         self.encoder = GRUEncoder(config.rnn_hidden_size, config.node_feat_dim)
         self.enc_proj = nn.Linear(config.rnn_hidden_size, config.rnn_hidden_size)
+        module_count = 1
 
         # STATIC
-        self.static_proj = nn.Linear(config.static_feat_dim, config.rnn_hidden_size)
+        self.static_module = static_module
+        if self.static_module:
+            self.static_proj = nn.Linear(config.static_feat_dim, config.rnn_hidden_size)
+            module_count += 1
 
         # SOCIAL
         self.social_module = social_module
@@ -64,17 +68,14 @@ class NEREUS(nn.Module):
         h_enc = self.enc_proj(h_enc_all[ego_idx])
         h_stack.append(h_enc.unsqueeze(0))
 
-        h_static = self.static_proj(data.static[ego_idx, :])
-        h_stack.append(h_static.unsqueeze(0))
+        if self.static_module:
+            h_static = self.static_proj(data.static[ego_idx, :])
+            h_stack.append(h_static.unsqueeze(0))
 
         if self.social_module:
-            #h_social = self.social_module(h_enc_all, data)
-            #h_social = self.gnn_proj(h_social[ego_idx])
-            #h_stack.append(h_social.unsqueeze(0))
-
-            h_gnn = self.social_module(h_enc_all, data.edge_index, data.edge_attr)
-            h_gnn = self.gnn_proj(h_gnn[ego_idx])
-            h_stack.append(h_gnn.unsqueeze(0))
+            h_social = self.social_module(h_enc_all, data)
+            h_social = self.gnn_proj(h_social[ego_idx])
+            h_stack.append(h_social.unsqueeze(0))
 
         if self.map_module:
             maps_v = maps.unsqueeze(0).expand(B, -1, -1, -1)

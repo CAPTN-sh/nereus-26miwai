@@ -10,7 +10,7 @@ from models.nereus.params import NEREUSParams
 from utils.logger import logger
 from train.training_loop import train_single_gpu, trial_jsonl_callback
 
-from utils.config import DATA_FOLDER_PATH, STEPS_PER_MINUTE
+from utils.config import DATA_FOLDER_PATH
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -23,20 +23,22 @@ def make_objective(data_folder: Path):
         model_cls, cfg, loss_fn, eval_fn = RNN, NEREUSParams(), loss, eval
 
         # general params
-        lr = trial.suggest_categorical("lr", [3e-3, 3e-4])
-        cfg.obs_len = trial.suggest_categorical("obs_len_min", [1, 5, 10, 15, 20]) * STEPS_PER_MINUTE
+        lr = trial.suggest_categorical("lr", [1e-3])
+        weight_decay = trial.suggest_categorical("weight_decay", [1e-5])
         cfg.rnn_hidden_size = trial.suggest_categorical("hidden_size", [256])
+        cfg.max_dist = 0
 
         try:
             metric = train_single_gpu(
-                model_cls=model_cls,
+                model = model_cls(cfg),
                 cfg=cfg,
                 loss_fn=loss_fn,
                 eval_fn=eval_fn,
                 data_folder=data_folder,
                 trial=trial,
                 lr=lr,
-                best_ckpt_path = None,
+                weight_decay=weight_decay,
+                best_ckpt_path = Path("checkpoints/rnn/rnn_256_best.pt"),
             )
             return metric
         except torch.cuda.OutOfMemoryError:
@@ -52,8 +54,8 @@ def run_worker():
     All workers share the same Optuna storage to coordinate trials.
     """
     grid = {
-        "lr": [3e-3, 3e-4],
-        "obs_len_min": [10],
+        "lr": [1e-3],
+        "weight_decay": [1e-5],
         "hidden_size": [256],
     }
 
@@ -111,9 +113,7 @@ if __name__ == "__main__":
 [Experiment 1] Best observation length for short and long term
 
 # encoder decoder
-CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=RNN OPTUNA_STORAGE="sqlite:///rnn_obs_len_b256.db" OPTUNA_STUDY="rnn_obs_len_b256" OPTUNA_JSONL="rnn_obs_len_b256.jsonl" python -u src/train/train_tune_rnn.py
-
-
+CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=RNN OPTUNA_STORAGE="sqlite:///rnn_256_full.db" OPTUNA_STUDY="rnn_256_full" OPTUNA_JSONL="rnn_256_full.jsonl" python -u src/train/train_tune_rnn.py
 CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=NEREUS OPTUNA_STORAGE="sqlite:///nereus_ed_big.db" OPTUNA_STUDY="nereus_ed_big" OPTUNA_JSONL="nereus_ed_big.jsonl" python -u src/train/train_tune_nereus.py
 
 """

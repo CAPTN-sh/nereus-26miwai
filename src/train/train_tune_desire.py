@@ -1,29 +1,17 @@
-import json
 import logging
 import os
 from pathlib import Path
-from datetime import datetime
-import time
-
-import numpy as np
-import pandas as pd
 import torch
-import torch.optim as optim
-from tqdm import tqdm
 import optuna
 
 from models.desire.model import DESIRE
 from models.desire.nn.loss import loss_desire
 from models.desire.utils.params import DESIREParams
-from loaders.graph_loader.loader import graph_loader
 from utils.logger import logger
 from train.eval import eval
-from train.early_stopper import EarlyStopper
-from models.utils.maps.scene_gernerator import SceneLoader
-from models.utils.maps.rasterize import Rasterizer
 from train.training_loop import train_single_gpu, trial_jsonl_callback
 
-from utils.config import DATA_FOLDER_PATH, STEPS_PER_MINUTE
+from utils.config import DATA_FOLDER_PATH
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -39,23 +27,23 @@ def make_objective(data_folder: Path):
         lr = trial.suggest_categorical("lr", [1e-3])
 
         cfg.hidden_size = trial.suggest_categorical("hidden_size", [256])
-        cfg.intermediate_size = trial.suggest_categorical("intermediate_size", [16, 32, 64])
         cfg.latent_size = trial.suggest_categorical("latent_size", [16])
         cfg.out_channels = trial.suggest_categorical("out_channels", [16])
-        cfg.max_dist = trial.suggest_categorical("max_dist", [1000]) #[10, 500, 1000, 2000])
-        cfg.num_refine_iters = trial.suggest_categorical("num_refine_iters", [1])
-        cfg.num_samples = trial.suggest_categorical("num_samples", [4])
+        cfg.intermediate_size = trial.suggest_categorical("intermediate_size", [128])
+        cfg.max_dist = trial.suggest_categorical("max_dist", [500]) #[10, 500, 1000, 2000])
+        cfg.num_refine_iters = trial.suggest_categorical("num_refine_iters", [2])
+        cfg.num_samples = trial.suggest_categorical("num_samples", [3])
 
         try:
             metric = train_single_gpu(
-                model_cls=model_cls,
+                model=model_cls(cfg),
                 cfg=cfg,
                 loss_fn=loss_fn,
                 eval_fn=eval_fn,
                 data_folder=data_folder,
                 trial=trial,
                 lr=lr,
-                best_ckpt_path = None,
+                best_ckpt_path = Path("checkpoints/desire/desire_best.pt"),
             )
             return metric
         except torch.cuda.OutOfMemoryError:
@@ -71,7 +59,7 @@ def run_worker():
     All workers share the same Optuna storage to coordinate trials.
     """
     grid = {
-        "intermediate_size": [16, 32, 64]
+        "num_samples": [3]
     }
 
     torch.backends.cudnn.benchmark = True
@@ -130,6 +118,6 @@ if __name__ == "__main__":
 [Experiment 1] Best observation length for short and long term
 
 # encoder decoder
-CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_inter.db" OPTUNA_STUDY="desire_inter" OPTUNA_JSONL="desire_inter.jsonl" python -u src/train/train_tune_desire.py
+CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_full.db" OPTUNA_STUDY="desire_full" OPTUNA_JSONL="desire_full.jsonl" python -u src/train/train_tune_desire.py
 
 """

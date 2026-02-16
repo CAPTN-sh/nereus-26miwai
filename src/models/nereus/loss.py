@@ -251,7 +251,6 @@ def eval_mdn(
                 obs_pos = data.x_pos[agent_idx].cpu().numpy()        # [T_obs, 2]
                 fut_pos = data.y_pos[agent_idx].cpu().numpy()        # [T_fut, 2]
                 pred_k = pred_abs_k[agent_idx].cpu().numpy()         # [K, T_fut, 2]
-                print("plotting")
 
                 plot_mdn_k_trajectories(
                     file_name=f"epoch_{epoch}_{i}_mdn_k_traj",
