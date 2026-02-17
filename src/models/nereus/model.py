@@ -18,7 +18,7 @@ class NEREUS(nn.Module):
             prior_module = None,
         ):
         super().__init__()
-        self.rasterizer = Rasterizer(config.bbox)
+        self.rasterizer = Rasterizer(config.bbox, pos_res=config.map_res)
 
         # ENCODER
         self.encoder = GRUEncoder(config.rnn_hidden_size, config.node_feat_dim)
@@ -40,14 +40,24 @@ class NEREUS(nn.Module):
         # MAP
         self.map_module = map_module
         if self.map_module:
-            self.map_cnn = ScenePoolingCNN(self.rasterizer, in_channels=4, out_channels=config.map_cnn_out)
+            self.map_cnn = ScenePoolingCNN(
+                self.rasterizer, 
+                radius=config.map_radius, 
+                in_channels=4, 
+                out_channels=config.map_cnn_out
+            )
             self.map_proj = nn.Linear(config.map_cnn_out, config.rnn_hidden_size)
             module_count += 1
 
         # PRIOR
         self.prior_module = prior_module
         if self.prior_module:
-            self.prior_cnn = ScenePoolingCNN(self.rasterizer, in_channels=1, out_channels=config.prior_cnn_out)
+            self.prior_cnn = ScenePoolingCNN(
+                self.rasterizer, 
+                radius=config.map_radius, 
+                in_channels=1, 
+                out_channels=config.prior_cnn_out
+            )
             self.prior_proj = nn.Linear(config.prior_cnn_out, config.rnn_hidden_size)
             module_count += 1
 
@@ -86,7 +96,16 @@ class NEREUS(nn.Module):
         if self.prior_module:
             with torch.no_grad():
                 #prior_map = self.prior_module(data).unsqueeze(1) # Density / Cluster
-                prior_map = self.prior_module(data, maps)
+                # prior_map = self.prior_module(data, maps)
+
+                embedding = self.eae(data, maps) # pretrained and frozen <- Ben 
+                cluster_id = self.cluster(embedding) # pretrained and frozen <- Ghassan
+                rep_map = self.represtation_maps[cluster_id] 
+
+                self.map_cnn(rep_map.unsqueeze(0).expand(B, -1, -1, -1), abs_pos)
+                h_stack.append(h_map.unsqueeze(0))
+
+
             h_prior = self.prior_cnn(prior_map, abs_pos)
             h_prior = self.prior_proj(h_prior)
             h_stack.append(h_prior.unsqueeze(0))

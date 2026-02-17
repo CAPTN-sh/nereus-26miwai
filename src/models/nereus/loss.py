@@ -188,6 +188,7 @@ def eval_mdn(
     n_mdn = 0
 
     revert_norm = 100.0
+    plotting = False
 
     n_eval_batches = int(len(eval_loader) // 10)
     with torch.inference_mode():
@@ -240,7 +241,7 @@ def eval_mdn(
             k_fde_sum += k_fde.sum().item()
             n_k_fde += k_fde.numel()
 
-            if i % 50 == 0:
+            if plotting and (i % 50 == 0):
                 agent_idx = 0  # ego already indexed
 
                 # find best mode by FDE

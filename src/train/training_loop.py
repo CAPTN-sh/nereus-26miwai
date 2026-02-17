@@ -98,7 +98,7 @@ def train_single_gpu(
     logging.info(f"[Trial {trial.number}] {trial_settings}")
     
     path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/"
-    sl = SceneLoader(Rasterizer([10.12, 54.31, 10.33, 54.46]))
+    sl = SceneLoader(Rasterizer([10.12, 54.31, 10.33, 54.46])) # todo if  pos_res=cfg.map_res
 
     scene_contiguous = np.ascontiguousarray(sl.load_scene(path))
     scene = torch.from_numpy(scene_contiguous).to(device).to(torch.float32)

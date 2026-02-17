@@ -23,6 +23,8 @@ class NEREUSParams:
     # TODO from config
     bbox = [10.12, 54.31, 10.33, 54.46]
     map_cnn_out: int = 128
+    map_radius: int = 1000
+    map_res: int = 10
     prior_cnn_out: int = 128
 
     prior_pred_scope: str = "path" # ["path", "destination"] (TrAISformer)
