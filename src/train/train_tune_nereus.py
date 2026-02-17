@@ -33,9 +33,12 @@ def make_objective(data_folder: Path):
         # general params
         lr = trial.suggest_categorical("lr", [1e-3])
         weight_decay = trial.suggest_categorical("weight_decay", [1e-5])
-        # with_static = trial.suggest_categorical("with_static", [True, False])
-        cfg.gnn_hidden_size = trial.suggest_categorical("gnn_hidden_size", [64, 128, 256])
-        cfg.max_dist = trial.suggest_categorical("max_dist", [500, 1000, 2000])
+
+        cfg.map_cnn_out = trial.suggest_categorical("map_cnn_out", [64, 128, 256])
+        cfg.map_radius = trial.suggest_categorical("map_radius", [500, 1000, 2000])
+        cfg.map_res = trial.suggest_categorical("map_res", [10, 50])
+
+        cfg.max_dist = 0
 
         assert torch.cuda.is_available()
         device = torch.device("cuda:0")
@@ -56,8 +59,8 @@ def make_objective(data_folder: Path):
         model = model_cls(
             config = cfg,
             static_module = True,
-            social_module = GAT(cfg), #GAT(cfg),
-            map_module = False, # True
+            social_module = None, # GAT(cfg), #GAT(cfg),
+            map_module = True, # True
             prior_module = None, # prior_module, # DensityIntent(density_maps)
         )
 
@@ -71,7 +74,7 @@ def make_objective(data_folder: Path):
                 trial=trial,
                 weight_decay=weight_decay,
                 lr=lr,
-                best_ckpt_path = None #Path("checkpoints/nereus/nereus_base_best.pt"),
+                best_ckpt_path = None, #Path("checkpoints/nereus/nereus_base_best.pt")
             )
             return metric
         except torch.cuda.OutOfMemoryError:
@@ -87,8 +90,9 @@ def run_worker():
     All workers share the same Optuna storage to coordinate trials.
     """
     grid = {
-        "gnn_hidden_size": [64],
-        "max_dist": [1000]
+        "map_cnn_out": [128],
+        "map_res": [10, 50],
+        "map_radius": [500, 1000, 2000],
     }
 
     torch.backends.cudnn.benchmark = True
@@ -149,6 +153,6 @@ if __name__ == "__main__":
 # encoder decoder
 CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=NEREUS OPTUNA_STORAGE="sqlite:///nereus_gnn.db" OPTUNA_STUDY="nereus_gnn" OPTUNA_JSONL="nereus_gnn.jsonl" python -u src/train/train_tune_nereus.py
 
-CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=NEREUS OPTUNA_STORAGE="sqlite:///nereus_ed_big.db" OPTUNA_STUDY="nereus_ed_big" OPTUNA_JSONL="nereus_ed_big.jsonl" python -u src/train/train_tune_nereus.py
+CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=NEREUS OPTUNA_STORAGE="sqlite:///nereus_map_res.db" OPTUNA_STUDY="nereus_map_res" OPTUNA_JSONL="nereus_map_res.jsonl" python -u src/train/train_tune_nereus.py
 
 """

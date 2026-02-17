@@ -16,7 +16,7 @@ def graph_loader(
     pin_memory=True,
     pred_len=30,
     obs_len=60,
-    max_edge_dist=500
+    max_edge_dist=0
 ):
 
     file_name = f"{AIS_SOURCE}_{data_folder.name}_{flag}"
