@@ -77,7 +77,7 @@ def train_single_gpu(
     trial: optuna.Trial,
     lr: float,
     weight_decay: float = 1e-5,
-    batch_size: int = 256,
+    batch_size: int = 512,
     best_ckpt_path: Path = None,
 ):
     # One trial = one GPU (the worker process sets CUDA_VISIBLE_DEVICES)
@@ -143,25 +143,30 @@ def train_single_gpu(
     loss_sum = 0.0
 
     is_tuning = best_ckpt_path is None
-    batches_per_eval = 5_000
-    max_epochs = 4
+    batches_per_eval = int(len(train_loader) // 10)
 
     if is_tuning:
-        max_batches = 50_000
+        max_epochs = 1
         max_seconds = HOUR * 1
+        warmup_batches = batches_per_eval
     else:
-        max_batches = 999_999
-        max_seconds = HOUR * 16
+        max_epochs = 10
+        max_seconds = HOUR * 10
         best_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            optimizer,
-            max_lr=lr,
-            total_steps=max_epochs * len(train_loader),
-            pct_start=0.2,
-            anneal_strategy='cos',
-            div_factor=25.0,
-            final_div_factor=1000.0
-        )
+        warmup_batches = batches_per_eval * 3
+    
+    warmup_lambda = lambda step: min(1.0, (step + 1) / warmup_batches)
+    warmup_scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_lambda)
+
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        factor=0.5,
+        patience=5,
+        cooldown=2,
+        min_lr=1e-6,
+    )
+
+    stopper = EarlyStopper(patience=15, min_delta=1e-4)
     
     best_metric = float("inf")
 
@@ -191,12 +196,12 @@ def train_single_gpu(
             step_time_ms = start_event.elapsed_time(end_event)
             training_time += (step_time_ms / 1000.0)
 
-            if not is_tuning:
-                scheduler.step()
-
             num_batches += 1
             total_batches += 1
             loss_sum += float(loss.item())
+
+            if total_batches <= warmup_batches:
+                warmup_scheduler.step()
 
             time_exeeded = time.perf_counter() - start_time > max_seconds
             if (total_batches % batches_per_eval == 0) or time_exeeded:
@@ -238,21 +243,26 @@ def train_single_gpu(
                         logging.info(
                             f"[Eval Step {eval_step}] New best metric={best_metric:.6f} → saved model"
                         )
+
+                if not is_tuning:
+                    scheduler.step(metric)
+
                 # report to Optuna (so pruning can work)
                 trial.report(metric, step=eval_step)
                 trial.set_user_attr("epochs_ran", eval_step)
                 if trial.should_prune():
                     logging.info(f"[TrialPruned] PercentilePruner")
                     raise optuna.TrialPruned()
-
-                if (total_batches >= max_batches):
-                    logging.info(f"[Eval Step {eval_step}] Trajectory budget exceeded: best={best_metric:.6f}")
-                    break
+                
+                if (total_batches > warmup_batches):
+                    if stopper.step(metric):
+                        logging.info(f"[Eval Step {eval_step}] Early stopping : best={stopper.best:.6f}")
+                        break
 
                 if time_exeeded:
                     logging.info(f"[Eval Step {eval_step}] Time budget exceeded: best={best_metric:.6f}")
                     break
 
-        if (total_batches >= max_batches) or time_exeeded:
+        if stopper.stop or time_exeeded:
             break
     return best_metric

@@ -17,7 +17,7 @@ class NEREUSParams:
 
     gnn_hidden_size: int = 128
     gnn_n_head: int = 4
-    max_dist: int = 500
+    max_dist: int = 1000
 
     # bbox
     # TODO from config

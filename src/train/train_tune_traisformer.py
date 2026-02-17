@@ -62,7 +62,7 @@ def run_worker():
     """
 
     grid = {
-        "weight_decay": [1e-5],
+        "lr": [3e-3],
     }
 
     torch.backends.cudnn.benchmark = True
@@ -121,7 +121,7 @@ if __name__ == "__main__":
 [Experiment 1] Best observation length for short and long term
 
 # traisformer
-CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///trais_full.db" OPTUNA_STUDY="trais_full" OPTUNA_JSONL="trais_full.jsonl" python -u src/train/train_tune_traisformer.py
+CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///trais_full.db" OPTUNA_STUDY="trais_full" OPTUNA_JSONL="trais_full.jsonl" python -u src/train/train_tune_traisformer.py
 
 CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=TRAISFORMER OPTUNA_STORAGE="sqlite:///trais_fact2.db" OPTUNA_STUDY="trais_fact" OPTUNA_JSONL="trais_fact.jsonl" python -u src/train/train_tune_traisformer.py
 

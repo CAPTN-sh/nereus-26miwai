@@ -33,9 +33,9 @@ def make_objective(data_folder: Path):
         # general params
         lr = trial.suggest_categorical("lr", [1e-3])
         weight_decay = trial.suggest_categorical("weight_decay", [1e-5])
-        cfg.mdn_modes = trial.suggest_categorical("mdn_modes", [3])
-        with_static = trial.suggest_categorical("with_static", [True, False])
-        cfg.max_dist = 0
+        # with_static = trial.suggest_categorical("with_static", [True, False])
+        cfg.gnn_hidden_size = trial.suggest_categorical("gnn_hidden_size", [64, 128, 256])
+        cfg.max_dist = trial.suggest_categorical("max_dist", [500, 1000, 2000])
 
         assert torch.cuda.is_available()
         device = torch.device("cuda:0")
@@ -54,9 +54,9 @@ def make_objective(data_folder: Path):
         #prior_module.eval()
 
         model = model_cls(
-            cfg, 
-            static_module = with_static,
-            social_module = None, #GAT(cfg),
+            config = cfg,
+            static_module = True,
+            social_module = GAT(cfg), #GAT(cfg),
             map_module = False, # True
             prior_module = None, # prior_module, # DensityIntent(density_maps)
         )
@@ -71,7 +71,7 @@ def make_objective(data_folder: Path):
                 trial=trial,
                 weight_decay=weight_decay,
                 lr=lr,
-                best_ckpt_path = Path("checkpoints/nereus/nereus_base_best.pt"),
+                best_ckpt_path = None #Path("checkpoints/nereus/nereus_base_best.pt"),
             )
             return metric
         except torch.cuda.OutOfMemoryError:
@@ -87,7 +87,8 @@ def run_worker():
     All workers share the same Optuna storage to coordinate trials.
     """
     grid = {
-        "with_static": [True]
+        "gnn_hidden_size": [64],
+        "max_dist": [1000]
     }
 
     torch.backends.cudnn.benchmark = True
@@ -133,7 +134,7 @@ def run_worker():
 
     cb = trial_jsonl_callback(jsonl_path)
 
-    study.optimize(objective, n_trials=1, gc_after_trial=True, callbacks=[cb])
+    study.optimize(objective, n_trials=3, gc_after_trial=True, callbacks=[cb])
 
     if study.best_trial is not None:
         logging.info(f"BEST value={study.best_value}")
@@ -146,7 +147,7 @@ if __name__ == "__main__":
 [Experiment 1] Best observation length for short and long term
 
 # encoder decoder
-CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=NEREUS OPTUNA_STORAGE="sqlite:///nereus_base.db" OPTUNA_STUDY="nereus_base" OPTUNA_JSONL="nereus_base.jsonl" python -u src/train/train_tune_nereus.py
+CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=NEREUS OPTUNA_STORAGE="sqlite:///nereus_gnn.db" OPTUNA_STUDY="nereus_gnn" OPTUNA_JSONL="nereus_gnn.jsonl" python -u src/train/train_tune_nereus.py
 
 CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=NEREUS OPTUNA_STORAGE="sqlite:///nereus_ed_big.db" OPTUNA_STUDY="nereus_ed_big" OPTUNA_JSONL="nereus_ed_big.jsonl" python -u src/train/train_tune_nereus.py
 

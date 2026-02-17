@@ -61,9 +61,10 @@ def eval(epoch, model: nn.Module, eval_loader: DataLoader, device, scene, trial_
     k_ade_sum = 0.0
     k_fde_sum = 0.0
 
+    n_eval_batches = int(len(eval_loader) // 10)
     with torch.inference_mode():
         for data in tqdm(eval_loader, desc="Evaluating"):
-            if n_batches >= 1000:
+            if n_batches >= n_eval_batches:
                 break
             data = data.to(device)
             n_batches += 1

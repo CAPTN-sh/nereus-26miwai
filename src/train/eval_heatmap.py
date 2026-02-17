@@ -39,9 +39,10 @@ def eval_heatmap(
     plotted = True
     n_plots = 5
 
+    n_eval_batches = int(len(eval_loader) // 10)
     with torch.inference_mode():
         for batch in tqdm(eval_loader, desc="Evaluating (heat maps)"):
-            if num_batches >= 1000:
+            if num_batches >= n_eval_batches:
                 break
 
             batch = batch.to(device, non_blocking=True)

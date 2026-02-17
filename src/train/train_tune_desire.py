@@ -118,6 +118,6 @@ if __name__ == "__main__":
 [Experiment 1] Best observation length for short and long term
 
 # encoder decoder
-CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_full.db" OPTUNA_STUDY="desire_full" OPTUNA_JSONL="desire_full.jsonl" python -u src/train/train_tune_desire.py
+CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=DESIRE OPTUNA_STORAGE="sqlite:///desire_full.db" OPTUNA_STUDY="desire_full" OPTUNA_JSONL="desire_full.jsonl" python -u src/train/train_tune_desire.py
 
 """
