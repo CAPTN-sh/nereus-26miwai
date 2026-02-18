@@ -300,6 +300,8 @@ class GraphTrajectoryDataset(Dataset):
             fin_pos_mask=torch.from_numpy(np.asarray(fin_pos_mask)).bool(),
             is_ego=is_ego,
             y_heatmap=y_heatmap,
+
+            target_id = target_id,
         )
 
         return data
