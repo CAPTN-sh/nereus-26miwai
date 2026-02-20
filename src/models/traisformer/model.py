@@ -27,6 +27,8 @@ class TrAISformer(nn.Module):
         )
 
         # state_embd
+        self.ctx_token = nn.Parameter(torch.zeros(1, 1, config.n_embd))
+
         self.lat_emb = nn.Embedding(self.x_size, config.n_embd // 4)
         self.lon_emb = nn.Embedding(self.y_size, config.n_embd // 4)
         self.sog_emb = nn.Embedding(sog_size, config.n_embd // 8)
@@ -38,7 +40,7 @@ class TrAISformer(nn.Module):
         self.terrain_embd = nn.Linear(64, config.n_embd)
         self.vessel_embd = nn.Linear(config.n_vessel_feat, config.n_embd)
 
-        self.pos_emb = nn.Parameter(torch.zeros(1, config.obs_len + 2, config.n_embd))
+        self.pos_emb = nn.Parameter(torch.zeros(1, config.obs_len + 3, config.n_embd))
         self.drop = nn.Dropout(config.dropout)
 
         # transformer
@@ -85,13 +87,14 @@ class TrAISformer(nn.Module):
         map_embedding = self.terrain_embd(self.scene_cnn(scene.unsqueeze(0))).expand(B, -1).unsqueeze(1)
         vessel_embedding = self.vessel_embd(static).unsqueeze(1)
 
-        tokens = torch.cat([map_embedding, vessel_embedding, traj_embeddings], dim=1)
+        ctx = self.ctx_token.expand(B, -1, -1)
+        tokens = torch.cat([ctx, map_embedding, vessel_embedding, traj_embeddings], dim=1)
 
-        position_embeddings = self.pos_emb[:, :seqlen + 2, :]
+        position_embeddings = self.pos_emb[:, :seqlen + 3, :]
         fea = self.drop(tokens + position_embeddings)
 
         ctx_mask = torch.ones(B, 1, device=obs_mask.device, dtype=torch.bool)
-        full_mask = torch.cat([ctx_mask, ctx_mask, obs_mask], dim=1)
+        full_mask = torch.cat([ctx_mask, ctx_mask, ctx_mask, obs_mask], dim=1)
 
         for blk in self.blocks:
             fea = blk(fea, full_mask)
