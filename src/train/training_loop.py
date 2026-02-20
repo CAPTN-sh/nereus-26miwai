@@ -16,6 +16,7 @@ from loaders.graph_loader.loader import graph_loader
 from train.early_stopper import EarlyStopper
 from models.utils.maps.scene_gernerator import SceneLoader
 from models.utils.maps.rasterize import Rasterizer
+from models.dae.cluster2 import cluster_and_plot
 
 from utils.config import DATA_FOLDER_PATH
 
@@ -98,7 +99,7 @@ def train_single_gpu(
     logging.info(f"[Trial {trial.number}] {trial_settings}")
     
     path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/"
-    sl = SceneLoader(Rasterizer([10.12, 54.31, 10.33, 54.46])) # todo if  pos_res=cfg.map_res
+    sl = SceneLoader(Rasterizer([10.12, 54.31, 10.33, 54.46]))
 
     scene_contiguous = np.ascontiguousarray(sl.load_scene(path))
     scene = torch.from_numpy(scene_contiguous).to(device).to(torch.float32)
@@ -224,6 +225,8 @@ def train_single_gpu(
                         config=cfg,
                     )
                 model.train()
+
+                # cluster_and_plot(model, rasterizer) TODO
 
                 metric = float(metric)
                 if metric < best_metric:

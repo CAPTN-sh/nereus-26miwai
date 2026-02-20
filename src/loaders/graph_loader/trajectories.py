@@ -10,7 +10,7 @@ from torch_geometric.data import Data, Dataset
 from models.traisformer.params import TraisformerParams
 from models.utils.maps.rasterize import Rasterizer
 
-from utils.config import SHIP_DB_PATH, STEPS_PER_MINUTE, STEP_SIZE, DATA_FOLDER_PATH
+from utils.config import SHIP_DB_PATH, STEPS_PER_MINUTE, STEP_SIZE
 RASTER = Rasterizer(TraisformerParams().bbox)
 
 def process_time(df: pd.DataFrame, min_date: pd.Timestamp, max_date: pd.Timestamp) -> pd.DataFrame:
@@ -58,6 +58,7 @@ class GraphTrajectoryDataset(Dataset):
         pred_len=30,
         min_len_in_minutes=1,
         max_edge_dist=500,
+        ship_group = "all", # ["all", "sailing", "cargo", "passenger", "other"]
     ):
         super(GraphTrajectoryDataset, self).__init__()
 
@@ -143,11 +144,13 @@ class GraphTrajectoryDataset(Dataset):
         ship_db['to_port'] /= 60
         ship_db['to_starboard'] /= 60
 
+        ship_group_df = ship_db[["traj_id", "ship_group"]].fillna(0.0).set_index("traj_id").copy()
+
         if "ship_group" in static_feat_cols:
             static_feat_cols += ["sailing", "cargo", "passenger", "other"]
             static_feat_cols.remove("ship_group")
 
-        ship_db = ship_db[["traj_id"] + static_feat_cols].copy()
+        ship_db = ship_db[["traj_id"] + static_feat_cols].fillna(0.0).copy()
         self.num_static_feats = len(static_feat_cols)
 
         self.static_map = {
@@ -201,9 +204,10 @@ class GraphTrajectoryDataset(Dataset):
         edges = edges.fillna(0)[["time", "traj_id", "traj_id_other"] + edge_feat_cols].copy()
 
         for traj_id, traj in tqdm(nodes.groupby("traj_id"), desc="Nodes"):
-            for cur_t in traj.index[self.min_valid_window:-self.min_valid_window]:
-                neighbors = traj_id_in_frame.get((cur_t, traj_id), [])
-                self.items.append((cur_t, traj_id, neighbors))
+            if (ship_group == "all") or (ship_group == ship_group_df.loc[traj_id, "ship_group"]):
+                for cur_t in traj.index[self.min_valid_window:-self.min_valid_window]:
+                    neighbors = traj_id_in_frame.get((cur_t, traj_id), [])
+                    self.items.append((cur_t, traj_id, neighbors))
 
             feat = traj[["rel_x", "rel_y"] + node_feat_cols].to_numpy(dtype=np.float32)
             padded_feat = np.pad(feat, ((self.l_pad, self.r_pad), (0, 0)), mode='constant')
@@ -228,6 +232,9 @@ class GraphTrajectoryDataset(Dataset):
         obs_mask_list = []
         static_list = []
 
+        all_fut_pos_list = []
+        all_fut_mask_list = []
+
         for traj_id in node_ids:
             t0 = self.t0[traj_id]
             pos = self.pos_map[traj_id]
@@ -240,6 +247,10 @@ class GraphTrajectoryDataset(Dataset):
             obs_raw_list.append(raw[t-self.obs_len:t])
             obs_pos_list.append(pos[t-self.obs_len:t])
             obs_mask_list.append(np.arange(t - self.obs_len, t) >= self.l_pad)
+
+            valid_end = len(pos) - self.r_pad
+            all_fut_pos_list.append([pos[t:t+self.pred_len]])
+            all_fut_mask_list.append(np.arange(t, t + self.pred_len) < valid_end)
 
             static_list.append(self.static_map[traj_id])
 
@@ -302,6 +313,8 @@ class GraphTrajectoryDataset(Dataset):
             y_heatmap=y_heatmap,
 
             target_id = target_id,
+            y_all = torch.from_numpy(np.asarray(all_fut_pos_list)).float(),
+            y_all_mask = torch.from_numpy(np.asarray(all_fut_mask_list)).float(),
         )
 
         return data

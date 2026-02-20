@@ -76,6 +76,8 @@ class MapAttention(nn.Module):
         x_idx, y_idx = self.rasterizer.pos_to_index(abs_pos)
         grid = self.base_grid[None] + torch.stack([x_idx, y_idx], dim=-1)[:, None, None, :]
 
+        print("TODO verify shape match!!")
+
         # F.grid_sample needs grid to be normalized to [-1, 1]
         grid[..., 0] = 2.0 * grid[..., 0] / (W - 1) - 1.0
         grid[..., 1] = 2.0 * grid[..., 1] / (H - 1) - 1.0

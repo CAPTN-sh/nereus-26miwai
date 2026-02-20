@@ -1,23 +1,22 @@
-from sklearn.mixture import GaussianMixture
-import pandas as pd
-import torch
-from torch import nn
-from loaders.graph_loader.loader import graph_loader
-from pathlib import Path
-from utils.config import DATA_FOLDER_PATH
-from models.dae.model import DAE
 import os
-from tqdm import tqdm
-
 from math import ceil
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import rasterio
+import torch
+from loaders.graph_loader.loader import graph_loader
+from models.dae.model import DAE
 from pyproj import Transformer
 from rasterio.transform import from_origin
 from rasterio.warp import transform_bounds
 from scipy.ndimage import gaussian_filter
-import rasterio
-import numpy as np
+from sklearn.mixture import GaussianMixture
+from torch import nn
+from tqdm import tqdm
+from utils.config import AIS_SOURCE, DATA_FOLDER_PATH
 
-from utils.config import AIS_SOURCE
 DEFAULT_CRS = "EPSG:4326"
 
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -49,7 +48,7 @@ class DAE_GMM(nn.Module):
             for batch in train_loader:
                 batch = batch.to(device)
 
-                z = self.dae.inference(batch)
+                rec, z = self.dae.inference(batch)
                 z = torch.nn.functional.normalize(z, dim=1)
                 all_z.append(z.cpu())
                 total_samples += z.size(0)
@@ -65,7 +64,7 @@ class DAE_GMM(nn.Module):
         self.dae.eval()
 
         with torch.no_grad():
-            z = self.dae.inference(data)
+            rec, z = self.dae.inference(data)
             z = torch.nn.functional.normalize(z, dim=1)
             z = z.cpu().numpy()
 
@@ -74,13 +73,16 @@ class DAE_GMM(nn.Module):
 
 if __name__ == "__main__":
 
+    flag = "val"
+
     assert torch.cuda.is_available()
     device = torch.device("cuda:0")
     torch.cuda.set_device(device)
+
     data_folder = DATA_FOLDER_PATH / "ais/4_features/fh_10/kiel"
     train_loader, _ = graph_loader(
         data_folder=data_folder,
-        flag="train",
+        flag=flag,
         min_date=pd.Timestamp("2022-01-01"),
         max_date=pd.Timestamp("2024-01-01"),
         batch_size= 512,
@@ -95,6 +97,7 @@ if __name__ == "__main__":
     ckpt = torch.load(best_ckpt_path, map_location=device)
     dae = DAE(ckpt["config"])
     dae.load_state_dict(ckpt["model_state_dict"])
+    dae = dae.to(device)
 
     print("fit k_means")
     K = 10
@@ -120,12 +123,10 @@ if __name__ == "__main__":
         for batch in tqdm(train_loader):
             batch = batch.to(device)
 
-            z = dae.inference(batch)
-            z = torch.nn.functional.normalize(z, dim=1)
-
             probs = torch.from_numpy(
-                gmm.predict_proba(z.cpu().numpy())
+                gmm.predict_proba(batch)
             ).to(device)
+            print(probs)
 
             traj_ids = batch.target_id.long().cpu()
 
@@ -163,9 +164,17 @@ if __name__ == "__main__":
         # --- Map traj_id → traj_idx ---
         # unique_ids is sorted from torch.unique
         unique_ids_np = unique_ids.cpu().numpy()
-        df_ids = df["target_id"].to_numpy()
+        df_ids = df["traj_id"].to_numpy()
 
         traj_indices = np.searchsorted(unique_ids_np, df_ids)
+        # Check which positions are valid matches
+        valid_mask = (
+            (traj_indices < len(unique_ids_np)) &
+            (unique_ids_np[traj_indices] == df_ids)
+        )
+
+        # Keep only valid ones
+        traj_indices = traj_indices[valid_mask]
 
         # --- Project coordinates ---
         to_laea = Transformer.from_crs(DEFAULT_CRS, local_crs, always_xy=True)
@@ -219,7 +228,7 @@ if __name__ == "__main__":
 
     cluster_probs_traj = cluster_sum / cluster_count.clamp(min=1).unsqueeze(1)
     cluster_probs_traj = cluster_probs_traj.clamp(min=1e-12)
-    file_name = f"{AIS_SOURCE}_{data_folder.name}_train"
+    file_name = f"{AIS_SOURCE}_{data_folder.name}_{flag}"
     path = data_folder / f"{file_name}_ship_features.parquet"
     df = pd.read_parquet(path)
 
@@ -234,7 +243,7 @@ if __name__ == "__main__":
         cluster_probs_traj=cluster_probs_traj,
         K=K,
         bbox=bbox,
-        folder_out= Path("data/maps/2_standardized/fh_10/kiel/gmm"),
+        folder_out= Path("data/gmm"),
         bbox_name="kiel",
         local_crs=local_crs,
         grid_res=grid_res,

@@ -5,7 +5,7 @@ from utils.config import STEPS_PER_MINUTE
 @dataclass
 class DAEParams:
     obs_len: int =  10 * STEPS_PER_MINUTE
-    pred_len: int = 1 # not 0 otherwise heatmap is generated
+    pred_len: int = 20 * STEPS_PER_MINUTE
     max_dist: int = 0
 
     n_traj_feat : int = 8

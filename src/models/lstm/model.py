@@ -21,7 +21,7 @@ class RNN(nn.Module):
         h = self.encoder(data.x[ego_idx], data.x_mask[ego_idx])
         h = self.h_proj(h).unsqueeze(0)
 
-        y = data.x[:, -1:, :2]
+        y = data.x[ego_idx, -1:, :2]
         preds = self.decoder(y, h)
 
         return preds

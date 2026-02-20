@@ -17,12 +17,13 @@ class DAE(nn.Module):
         traj_feat = data.x[ego_idx, :, :]
         static_feat = data.static[ego_idx, :]
         mask = data.x_mask[ego_idx, :]
+        fut_mask = data.y_mask
 
         noise = torch.randn_like(traj_feat) * self.noise_std
         traj_feat = traj_feat + noise * mask.unsqueeze(-1)
 
         latent = self.encoder(traj_feat, static_feat, mask)
-        rec = self.decoder(latent, mask)
+        rec = self.decoder(latent, fut_mask)
 
         return rec, latent
     
@@ -31,9 +32,10 @@ class DAE(nn.Module):
         traj_feat = data.x[ego_idx, :, :]
         static_feat = data.static[ego_idx, :]
         mask = data.x_mask[ego_idx, :]
+        fut_mask = data.y_mask
 
         latent = self.encoder(traj_feat, static_feat, mask)
-        rec = self.decoder(latent, mask)
+        rec = self.decoder(latent, fut_mask)
 
         return rec, latent
     

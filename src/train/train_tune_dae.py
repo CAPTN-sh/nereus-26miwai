@@ -35,10 +35,9 @@ def make_objective(data_folder: Path):
         model_cls, cfg, loss_fn, eval_fn = DAE, DAEParams(), rec_loss, rec_eval
 
         # general params
-        lr = trial.suggest_categorical("lr", [1e-3])
+        lr = trial.suggest_categorical("lr", [3e-3])
         weight_decay = trial.suggest_categorical("weight_decay", [1e-5])
-
-        cfg.d_model = trial.suggest_categorical("d_model", [32, 64, 128, 256])
+        cfg.d_model = trial.suggest_categorical("d_model", [128])
 
         try:
             metric = train_single_gpu(
@@ -50,7 +49,7 @@ def make_objective(data_folder: Path):
                 trial=trial,
                 weight_decay=weight_decay,
                 lr=lr,
-                best_ckpt_path = None, #Path("checkpoints/nereus/nereus_base_best.pt")
+                best_ckpt_path = Path("checkpoints/dae/dae_32_best.pt")
             )
             return metric
         except torch.cuda.OutOfMemoryError:
@@ -66,7 +65,7 @@ def run_worker():
     All workers share the same Optuna storage to coordinate trials.
     """
     grid = {
-        "d_model": [256],
+        "d_model": [128],
     }
 
     torch.backends.cudnn.benchmark = True
@@ -125,6 +124,6 @@ if __name__ == "__main__":
 [Experiment 1] Best observation length for short and long term
 
 # encoder decoder
-CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=DAE OPTUNA_STORAGE="sqlite:///dae.db" OPTUNA_STUDY="dae" OPTUNA_JSONL="dae.jsonl" python -u src/train/train_tune_dae.py
+CUDA_VISIBLE_DEVICES=0 MODEL_CHOICE=DAE OPTUNA_STORAGE="sqlite:///dae_32.db" OPTUNA_STUDY="dae_32" OPTUNA_JSONL="dae_32.jsonl" python -u src/train/train_tune_dae.py
 
 """

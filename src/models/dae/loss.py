@@ -12,6 +12,9 @@ def rec_loss(output, data, config = None):
     traj_feat = data.x[ego_idx, :, :]
     mask = data.x_mask[ego_idx, :]
 
+    fut_pos_rel = data.y_rel_pos.unsqueeze(1)
+    fut_mask = data.y_mask
+
     err = (traj_feat - rec).pow(2).mean(dim=-1) 
     err = err * mask
 

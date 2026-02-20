@@ -147,10 +147,6 @@ class EgoSocialPooling(nn.Module):
 
         self.social_pool = SocialPoolFast(config)
         self.pre_norm = nn.LayerNorm(config.rnn_hidden_size)
-        self.proj = nn.Linear(
-            config.rnn_hidden_size,
-            config.gnn_hidden_size
-        )
 
     def forward(self, h_enc, data):
         h_enc = self.pre_norm(h_enc)
@@ -162,8 +158,4 @@ class EgoSocialPooling(nn.Module):
             edge_index=data.edge_index
         )                                        # [N, 1, H]
 
-        pooled = pooled.squeeze(1)               # [N, H]
-        pooled = self.proj(pooled)               # [N, gnn_hidden]
-
-        return pooled
-
+        return pooled.squeeze(1)

@@ -16,7 +16,9 @@ def graph_loader(
     pin_memory=True,
     pred_len=30,
     obs_len=60,
-    max_edge_dist=500
+    max_edge_dist=500,
+    shuffle = True,
+    ship_group = "all", # ["all", "sailing", "cargo", "passenger", "other"]
 ):
 
     file_name = f"{AIS_SOURCE}_{data_folder.name}_{flag}"
@@ -28,13 +30,14 @@ def graph_loader(
         pred_len=pred_len,
         obs_len=obs_len,
         max_edge_dist=max_edge_dist,
+        ship_group = ship_group,
     )
 
     loader = DataLoader(
         dset,
         batch_size=batch_size,
         num_workers=4,
-        shuffle=True,
+        shuffle=shuffle,
         pin_memory=pin_memory,
         prefetch_factor=4,
         persistent_workers=False,

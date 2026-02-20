@@ -100,7 +100,7 @@ class TrAISformer(nn.Module):
         z = fea[:, 0, :]
         logits = self.intent_head(z)
 
-        return logits
+        return logits, z
 
     def inference(self, batch, scene=None):
         return self.forward(batch, scene), None

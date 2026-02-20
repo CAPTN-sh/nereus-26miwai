@@ -11,7 +11,7 @@ class TransformerDecoder(nn.Module):
         super().__init__()
         # embeddings
         self.ctx_proj = nn.Linear(config.latent_dim, config.d_model)
-        self.pos_emb = nn.Parameter(torch.zeros(1, config.obs_len, config.d_model))
+        self.pos_emb = nn.Parameter(torch.zeros(1, config.pred_len, config.d_model))
         self.drop = nn.Dropout(config.dropout)
 
         # transformer

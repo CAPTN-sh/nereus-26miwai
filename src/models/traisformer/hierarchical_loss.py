@@ -7,12 +7,13 @@ from models.utils.maps.rasterize import Rasterizer
 RASTER = Rasterizer(TraisformerParams().bbox)
 
 def loss_intent_heatmap(
-    output: Dict[str, torch.Tensor],
+    output,
     data,
     config=None,
 ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-    
-    logits = output[data.fin_pos_mask]
+    logits, z = output
+    logits = logits[data.fin_pos_mask]
+
     assert logits.shape[1] == 1
     logits = logits.squeeze(1)
     B, H, W = logits.shape
@@ -25,7 +26,7 @@ def loss_intent_heatmap(
     fin_pos = data.fin_pos[data.fin_pos_mask]
     target_fine = rasterize_destination(fin_pos) # (B, H, W)
     target_fine_flat = target_fine.view(B, -1)
-    
+
     # Wo liegt das Schiff wirklich? (Index des Pixels)
     target_indices = torch.argmax(target_fine_flat, dim=1)
 
@@ -55,7 +56,7 @@ def loss_intent_heatmap(
         p_gt = probs_fine.gather(1, target_indices.unsqueeze(1)).mean()
 
     # 6. Gesamt-Loss
-    loss = ce_fine + config.coarse_loss_beta * ce_coarse
+    loss = ce_fine + config.coarse_loss_beta * ce_coarse 
 
     return loss, {
         "ce_fine": ce_fine,
@@ -77,15 +78,15 @@ def rasterize_destination(fin_pos):
 
     grid = torch.zeros((B, x_bins, y_bins), device=fin_pos.device)
     grid[torch.arange(B), x_idx, y_idx] = 1.0
+
     return grid
 
 def loss_occupancy_heatmap(
-    output: Dict[str, torch.Tensor],
+    output,
     data,
     config=None,
 ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-    
-    logits = output # (B, 1, H, W)
+    logits, z = output
     assert logits.shape[1] == 1
     logits = logits.squeeze(1)
 
