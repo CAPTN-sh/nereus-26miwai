@@ -147,6 +147,6 @@ if __name__ == "__main__":
 # encoder decoder
 CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=NEREUS OPTUNA_STORAGE="sqlite:///nereus_pool_full.db" OPTUNA_STUDY="nereus_pool_full" OPTUNA_JSONL="nereus_pool_full.jsonl" python -u src/train/train_tune_nereus.py
 
-CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=NEREUS OPTUNA_STORAGE="sqlite:///nereus_ed_big.db" OPTUNA_STUDY="nereus_ed_big" OPTUNA_JSONL="nereus_ed_big.jsonl" python -u src/train/train_tune_nereus.py
+CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=NEREUS OPTUNA_STORAGE="sqlite:///nereus_map_res.db" OPTUNA_STUDY="nereus_map_res" OPTUNA_JSONL="nereus_map_res.jsonl" python -u src/train/train_tune_nereus.py
 
 """
