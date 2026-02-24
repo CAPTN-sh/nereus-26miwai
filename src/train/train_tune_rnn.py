@@ -4,18 +4,13 @@ from pathlib import Path
 import torch
 import optuna
 
-from models.lstm.model import RNN
+from models.rnn.model import RNN
 from models.nereus.loss import loss, eval
 from models.nereus.params import NEREUSParams
-from utils.logger import logger
-from train.training_loop import train_single_gpu, trial_jsonl_callback
+from utils.logger import logger, trial_jsonl_callback
+from train.training_loop import train_single_gpu
 
 from utils.config import DATA_FOLDER_PATH
-
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 def make_objective(data_folder: Path):
 
@@ -48,7 +43,7 @@ def make_objective(data_folder: Path):
 
     return objective
 
-def run_worker():
+def train():
     """
     One worker process. It sees exactly ONE GPU because launcher sets CUDA_VISIBLE_DEVICES.
     All workers share the same Optuna storage to coordinate trials.
@@ -107,7 +102,7 @@ def run_worker():
         logging.info(f"BEST params={study.best_params}")
 
 if __name__ == "__main__":
-    run_worker()
+    train()
 
 """
 [Experiment 1] Best observation length for short and long term

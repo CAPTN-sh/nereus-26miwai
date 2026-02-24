@@ -4,7 +4,6 @@ from utils.config import STEPS_PER_MINUTE
 
 @dataclass
 class TraisformerParams:
-    # Sequence lengths
     pred_scope: str = "path" # ["path", "destination"]
     intent_head = "factorized" # "linear", "factorized" "cnn", "mixture", "lowrank"
     k_rank = 15
@@ -14,7 +13,6 @@ class TraisformerParams:
     obs_len: int =  10 * STEPS_PER_MINUTE
 
     # bbox
-    # TODO from config
     bbox = [10.12, 54.31, 10.33, 54.46]
 
     # Model dims

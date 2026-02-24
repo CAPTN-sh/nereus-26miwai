@@ -6,7 +6,6 @@ import torch.nn as nn
 class Rasterizer(nn.Module):
     def __init__(self, bbox, pos_res = 50):
         super().__init__()
-        # TODO transformer from config
         transformer = pyproj.Transformer.from_crs(
             pyproj.CRS("EPSG:4326"), pyproj.CRS("EPSG:25832"), always_xy=True
         )
@@ -25,7 +24,7 @@ class Rasterizer(nn.Module):
         self.cog_max = 360
         self.cog_size = int(self.cog_max / self.cog_res)
 
-        # bins from quantiles 
+        # bins generated from quantiles (training set "kiel")
         self.register_buffer("acc_bins", torch.tensor([-0.070, -0.034, -0.017, -0.009, -0.005, 0.005, 0.009, 0.017, 0.034, 0.070]))
         self.register_buffer("rot_bins", torch.tensor([-2.9, -1.6, -1.0, -0.7, -0.5, 0.5, 0.7, 1.0, 1.6, 2.9]))
 

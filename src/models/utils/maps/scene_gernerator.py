@@ -44,24 +44,26 @@ class SceneLoader():
             return out_data[tuple(ind)]
     
     def geojson_to_dist(self, path):
-            gdf = gpd.read_file(path)
-            # In das Ziel-System (UTM) transformieren
-            gdf = gdf.to_crs(CRS_TARGET)
-            
-            # Rasterize
-            mask = rasterize(
-                [(geom, 1) for geom in gdf.geometry],
-                out_shape=self.target_shape,
-                transform=self.affine,
-                fill=0,
-                all_touched=True
-            )
-            # Euklidische Distanz (in Pixeln, dann mal Auflösung = Meter)
-            dist_m = distance_transform_edt(mask == 0) * self.rasterizer.pos_res
-            dist_m = np.minimum(dist_m, MAX_DIST)
-            dist_log = np.log1p(dist_m) / np.log1p(MAX_DIST)
+        if path is None or not Path(path).exists():
+            return np.ones(self.target_shape, dtype=np.float32)
+        gdf = gpd.read_file(path)
+        # In das Ziel-System (UTM) transformieren
+        gdf = gdf.to_crs(CRS_TARGET)
+        
+        # Rasterize
+        mask = rasterize(
+            [(geom, 1) for geom in gdf.geometry],
+            out_shape=self.target_shape,
+            transform=self.affine,
+            fill=0,
+            all_touched=True
+        )
+        # Euklidische Distanz (in Pixeln, dann mal Auflösung = Meter)
+        dist_m = distance_transform_edt(mask == 0) * self.rasterizer.pos_res
+        dist_m = np.minimum(dist_m, MAX_DIST)
+        dist_log = np.log1p(dist_m) / np.log1p(MAX_DIST)
 
-            return dist_log
+        return dist_log
 
     def load_scene(self, base_path: Path):
         # Layer verarbeiten
@@ -85,6 +87,14 @@ class SceneLoader():
 
         map_stack = np.stack([sailing, cargo, passenger, other])
         map_stack = np.flip(map_stack, axis=1)
+        return map_stack
+    
+    def load_cluster(self, base_path: Path, n_cluster):
+        folder = base_path / f"cluster_{n_cluster}"
+        map_stack = np.stack([
+            self.tiff_to_grid(folder / f"density_cluster_{i}.tif") 
+            for i in range(n_cluster)
+        ])
         return map_stack
 
 def plot_maps(map_stack, rasterizer):

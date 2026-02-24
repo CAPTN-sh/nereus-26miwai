@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models.nereus.scene import ScenePoolingCNN
+from models.nereus.scene import ScenePoolingCNN, MapAttention
 from models.nereus.params import NEREUSParams
 from models.utils.rnn import GRUEncoder, MDNDecoder
 from torch_geometric.data import Data
@@ -16,6 +16,7 @@ class NEREUS(nn.Module):
             social_module = None, 
             map_module = None, 
             prior_module = None,
+            map_atte_module = None,
         ):
         super().__init__()
         self.rasterizer = Rasterizer(config.bbox, pos_res=config.map_res)
@@ -61,6 +62,19 @@ class NEREUS(nn.Module):
             self.prior_proj = nn.Linear(config.prior_cnn_out, config.rnn_hidden_size)
             module_count += 1
 
+        # MAP
+        self.map_atte_module = map_atte_module
+        if self.map_atte_module:
+            self.map_cnn = MapAttention(
+                self.rasterizer, 
+                radius=config.map_radius, 
+                in_channels=4, 
+                out_channels=config.map_cnn_out,
+                query_dim=config.rnn_hidden_size,
+            )
+            self.map_proj = nn.Linear(config.map_cnn_out, config.rnn_hidden_size)
+            module_count += 1
+
         # DECODER
         self.w = nn.Parameter(torch.tensor([1.0] * module_count))
         self.dropout_layer = nn.Dropout(0.1)
@@ -95,20 +109,17 @@ class NEREUS(nn.Module):
 
         if self.prior_module:
             with torch.no_grad():
-                #prior_map = self.prior_module(data).unsqueeze(1) # Density / Cluster
-                # prior_map = self.prior_module(data, maps)
-
-                embedding = self.eae(data, maps) # pretrained and frozen <- Ben 
-                cluster_id = self.cluster(embedding) # pretrained and frozen <- Ghassan
-                rep_map = self.represtation_maps[cluster_id] 
-
-                self.map_cnn(rep_map.unsqueeze(0).expand(B, -1, -1, -1), abs_pos)
-                h_stack.append(h_map.unsqueeze(0))
-
+                prior_map, _ = self.prior_module(data, maps)
 
             h_prior = self.prior_cnn(prior_map, abs_pos)
             h_prior = self.prior_proj(h_prior)
             h_stack.append(h_prior.unsqueeze(0))
+
+        if self.map_atte_module:
+            maps_v = maps.unsqueeze(0).expand(B, -1, -1, -1)
+            h_map = self.map_cnn(maps_v, abs_pos, h_prior)
+            h_map = self.map_proj(h_map)
+            h_stack.append(h_map.unsqueeze(0))
 
         w = torch.softmax(self.w, dim=0)
         h_stack = torch.stack([torch.tanh(h) for h in h_stack], dim=0)

@@ -4,11 +4,11 @@ import threading
 from pathlib import Path
 
 import yaml
-
-DATA_FOLDER_PATH = Path("/data/projects/ship_tracker/assets")
+# DATA_FOLDER_PATH = Path("/data/projects/ship_tracker/assets")
+DATA_FOLDER_PATH = Path("/home/bbi/nereus/assets")
 SHIP_DB_PATH = DATA_FOLDER_PATH / "ship_db/ship_db.parquet"
 
-AIS_SOURCE = "fh"
+AIS_SOURCE = "dma"
 
 STEP_SIZE = 10
 STEPS_PER_MINUTE = 60 // STEP_SIZE

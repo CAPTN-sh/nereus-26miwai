@@ -7,9 +7,9 @@ import optuna
 from models.desire.model import DESIRE
 from models.desire.nn.loss import loss_desire
 from models.desire.utils.params import DESIREParams
-from utils.logger import logger
+from utils.logger import logger, trial_jsonl_callback
 from train.eval import eval
-from train.training_loop import train_single_gpu, trial_jsonl_callback
+from train.training_loop import train_single_gpu
 
 from utils.config import DATA_FOLDER_PATH
 

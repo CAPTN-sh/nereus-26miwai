@@ -100,7 +100,6 @@ class GraphTrajectoryDataset(Dataset):
 
         #### NODES ####
         nodes = pd.read_parquet(nodes_path)
-        # nodes = nodes[nodes.groupby('traj_id')['is_entry'].transform('last') == 1]
         nodes = process_time(nodes, min_date, max_date)
         nodes = cords_to_meters(nodes)
         traj_g = nodes.groupby("traj_id")

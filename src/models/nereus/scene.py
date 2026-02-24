@@ -37,22 +37,47 @@ class ScenePoolingCNN(nn.Module):
         x = self.pool(x)
         return x.view(x.size(0), -1)
 
+    def sample_scene_features(self, scene, abs_pos):
+        N, C, H, W = scene.shape
+
+        # shift grid
+        x_idx, y_idx = self.rasterizer.pos_to_index(abs_pos)
+        grid = self.base_grid[None] + torch.stack([x_idx, y_idx], dim=-1)[:, None, None, :]
+
+        # F.grid_sample needs grid to be normalized to [-1, 1]
+        grid[..., 0] = 2.0 * grid[..., 0] / (W - 1) - 1.0
+        grid[..., 1] = 2.0 * grid[..., 1] / (H - 1) - 1.0
+
+        scene_sample = F.grid_sample(
+            scene,
+            grid,
+            mode="bilinear",
+            padding_mode="zeros",
+            align_corners=True,
+        )
+        return scene_sample
+
 class MapAttention(nn.Module):
-    def __init__(self, in_channels, vessel_dim, hidden_dim):
+    def __init__(self, rasterizer, radius, in_channels, out_channels, query_dim):
         super().__init__()
+        self.rasterizer = rasterizer
+        self.radius = radius
 
         self.map_encoder = nn.Sequential(
-            nn.Conv2d(in_channels, 32, 3, padding=1),
+            nn.Conv2d(in_channels, 16, 3, padding=1),
             nn.ReLU(),
-            nn.Conv2d(32, hidden_dim, 3, padding=1),
+            nn.Conv2d(16, 32, 3, padding=1),
             nn.ReLU(),
+            nn.Conv2d(32, out_channels, 3, padding=1),
         )
 
-        self.query_proj = nn.Linear(vessel_dim, hidden_dim)
-        self.key_proj   = nn.Linear(hidden_dim, hidden_dim)
-        self.value_proj = nn.Linear(hidden_dim, hidden_dim)
+        self.query_proj = nn.Linear(query_dim, out_channels)
+        self.key_proj   = nn.Linear(out_channels, out_channels)
+        self.value_proj = nn.Linear(out_channels, out_channels)
 
-    def forward(self, scene, abs_pos, vessel_feat):
+        self.register_buffer("base_grid", self.build_base_grid())
+
+    def forward(self, scene, abs_pos, query_feat):
         x = self.sample_scene_features(scene, abs_pos)
         
         feat = self.map_encoder(x)  # B,C,H,W
@@ -60,7 +85,7 @@ class MapAttention(nn.Module):
 
         tokens = feat.flatten(2).transpose(1,2)  # B, HW, C
 
-        Q = self.query_proj(vessel_feat).unsqueeze(1)  # B,1,C
+        Q = self.query_proj(query_feat).unsqueeze(1)  # B,1,C
         K = self.key_proj(tokens)
         V = self.value_proj(tokens)
 
@@ -69,14 +94,19 @@ class MapAttention(nn.Module):
 
         return context
     
+    def build_base_grid(self):
+        R = int(self.radius / self.rasterizer.pos_res)
+        ys = torch.linspace(-R + 0.5, R - 0.5, 2 * R)
+        xs = torch.linspace(-R + 0.5, R - 0.5, 2 * R)
+        yy, xx = torch.meshgrid(ys, xs, indexing="ij")
+        return torch.stack([xx, yy], dim=-1)
+    
     def sample_scene_features(self, scene, abs_pos):
         N, C, H, W = scene.shape
 
         # shift grid
         x_idx, y_idx = self.rasterizer.pos_to_index(abs_pos)
         grid = self.base_grid[None] + torch.stack([x_idx, y_idx], dim=-1)[:, None, None, :]
-
-        print("TODO verify shape match!!")
 
         # F.grid_sample needs grid to be normalized to [-1, 1]
         grid[..., 0] = 2.0 * grid[..., 0] / (W - 1) - 1.0

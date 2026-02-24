@@ -7,23 +7,24 @@ import optuna
 
 from models.nereus.social import GAT, EgoSocialPooling
 from models.nereus.model import NEREUS
+from models.nereus.intent import DensityIntent
 from models.nereus.loss import mdn_loss, eval_mdn
 from models.nereus.params import NEREUSParams
-from utils.logger import logger
+from utils.logger import logger, trial_jsonl_callback
 from models.utils.maps.scene_gernerator import SceneLoader
 from models.utils.maps.rasterize import Rasterizer
+from models.gmm.model import AIS_GMM, MAP_GMM
 
 from models.traisformer.model import TrAISformer
 
 from utils.config import DATA_FOLDER_PATH
+from train.training_loop import train_single_gpu
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
-from train.training_loop import train_single_gpu, trial_jsonl_callback
-# print("Weights:", torch.softmax(model.w, dim=0).tolist())
 
 def make_objective(data_folder: Path):
 
@@ -33,31 +34,54 @@ def make_objective(data_folder: Path):
         # general params
         lr = trial.suggest_categorical("lr", [1e-3])
         weight_decay = trial.suggest_categorical("weight_decay", [1e-5])
-        cfg.gnn_hidden_size = trial.suggest_categorical("gnn_hidden_size", [256])
-        cfg.max_dist = trial.suggest_categorical("max_dist", [500])
 
         assert torch.cuda.is_available()
         device = torch.device("cuda:0")
         torch.cuda.set_device(device)
 
-        #path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/"
-        #sl = SceneLoader(Rasterizer([10.12, 54.31, 10.33, 54.46]))
+        
+        path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/"
+        sl = SceneLoader(Rasterizer([10.12, 54.31, 10.33, 54.46]))
 
-        #density_contiguous = np.ascontiguousarray(sl.load_density(path))
-        #density_maps = torch.from_numpy(density_contiguous).to(device).to(torch.float32)
+        density_contiguous = np.ascontiguousarray(sl.load_density(path))
+        density_maps = torch.from_numpy(density_contiguous).to(device).to(torch.float32)
 
-        #best_ckpt_path = Path("checkpoints/traisformer") / f"traisformer_{cfg.prior_pred_scope}_best.pt"
-        #ckpt = torch.load(best_ckpt_path, map_location=device)
-        #prior_module = TrAISformer(ckpt["config"])
-        #prior_module.load_state_dict(ckpt["model_state_dict"])
-        #prior_module.eval()
+        """
+        best_ckpt_path = Path("checkpoints/traisformer/traisformer_path_best.pt")
+        ckpt = torch.load(best_ckpt_path, map_location=device)
+        prior_module = TrAISformer(ckpt["config"])
+        prior_module.load_state_dict(ckpt["model_state_dict"])
+        prior_module.eval()
+        prior_module.requires_grad_(False)
+        
+
+        best_ckpt_path = Path(f"data/gmm/cluster_{n_cluster}/ais_gmm.pt")
+        ckpt = torch.load(best_ckpt_path, map_location=device)
+
+        trais = TrAISformer(ckpt["prior_config"]).to(device)
+        trais.load_state_dict(ckpt["prior_state_dict"])
+        trais.eval()
+        trais.requires_grad_(False)
+
+        ais_gmm = AIS_GMM(trais, n_clusters=ckpt["n_clusters"])
+        ais_gmm.gmm = ckpt["gmm"]
+
+        path = Path("data/gmm")
+        sl = SceneLoader(Rasterizer([10.12, 54.31, 10.33, 54.46]))
+
+        cluster_contiguous = np.ascontiguousarray(sl.load_cluster(path, n_cluster))
+        cluster_maps = torch.from_numpy(cluster_contiguous).to(device).to(torch.float32)
+        prior_module = MAP_GMM(ais_gmm, cluster_maps)
+
+        """
 
         model = model_cls(
             config = cfg,
             static_module = True,
-            social_module = EgoSocialPooling(cfg), #GAT(cfg), EgoSocialPooling
-            map_module = False, # True
-            prior_module = None, # prior_module, # DensityIntent(density_maps)
+            social_module = GAT(cfg), # GAT(cfg), #EgoSocialPooling(cfg), #GAT(cfg), EgoSocialPooling
+            map_module = True, # True
+            prior_module = DensityIntent(density_maps), # DensityIntent(density_maps), # DensityIntent(density_maps), # prior_module, # DensityIntent(density_maps)
+            map_atte_module = False,
         )
 
         try:
@@ -70,7 +94,7 @@ def make_objective(data_folder: Path):
                 trial=trial,
                 weight_decay=weight_decay,
                 lr=lr,
-                best_ckpt_path = Path("checkpoints/nereus/nereus_pool_best.pt"),
+                best_ckpt_path = Path("checkpoints/nereus/nereus_all_best.pt"),
             )
             return metric
         except torch.cuda.OutOfMemoryError:
@@ -145,7 +169,7 @@ if __name__ == "__main__":
 [Experiment 1] Best observation length for short and long term
 
 # encoder decoder
-CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=NEREUS OPTUNA_STORAGE="sqlite:///nereus_pool_full.db" OPTUNA_STUDY="nereus_pool_full" OPTUNA_JSONL="nereus_pool_full.jsonl" python -u src/train/train_tune_nereus.py
+CUDA_VISIBLE_DEVICES=1 MODEL_CHOICE=NEREUS OPTUNA_STORAGE="sqlite:///nereus_all_full.db" OPTUNA_STUDY="nereus_all_full" OPTUNA_JSONL="nereus_all_full.jsonl" python -u src/train/train_tune_nereus.py
 
 CUDA_VISIBLE_DEVICES=3 MODEL_CHOICE=NEREUS OPTUNA_STORAGE="sqlite:///nereus_map_res.db" OPTUNA_STUDY="nereus_map_res" OPTUNA_JSONL="nereus_map_res.jsonl" python -u src/train/train_tune_nereus.py
 

@@ -15,10 +15,10 @@ from models.utils.maps.rasterize import Rasterizer
 
 from scipy.interpolate import PchipInterpolator
 
-from models.lstm.model import RNN
+from models.rnn.model import RNN
 
 from utils.config import DATA_FOLDER_PATH
-from t_eval.cpa import compute_batch_collision_risk
+from eval.cpa import compute_batch_collision_risk
 
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -62,8 +62,11 @@ def full_eval(data_folder, model):
             ship_group = ship_group,
         )
 
-        path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/"
-        sl = SceneLoader(Rasterizer([10.12, 54.31, 10.33, 54.46]))
+        #path = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel/"
+        #sl = SceneLoader(Rasterizer([10.12, 54.31, 10.33, 54.46]))
+
+        path = DATA_FOLDER_PATH / "maps/2_standardized/dma_10/aarhus/"
+        sl = SceneLoader(Rasterizer([10.21, 56.04, 10.47, 56.17]))
 
         scene_contiguous = np.ascontiguousarray(sl.load_scene(path))
         scene = torch.from_numpy(scene_contiguous).to(device).to(torch.float32)
@@ -95,7 +98,7 @@ def full_eval(data_folder, model):
                 data = data.to(device, non_blocking=True)
 
                 start_event.record()
-                pred_rel_pos = model(data, scene)
+                pred_rel_pos = model(data, None)
                 end_event.record()
                 torch.cuda.synchronize()
 
@@ -184,5 +187,5 @@ if __name__ == "__main__":
     #logger(file_prefix=f"eval_ground_truth")
     #logging.info("ground_truth")
 
-    data_folder = DATA_FOLDER_PATH / "ais/4_features/fh_10/kiel"
+    data_folder = DATA_FOLDER_PATH / "ais/4_features/dma_10/aarhus"
     full_eval(data_folder, model)
