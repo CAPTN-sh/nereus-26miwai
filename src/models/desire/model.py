@@ -1,11 +1,13 @@
 import torch.nn as nn
 import torch
 
-from models.desire.IOC import IOC
-from models.desire.nn.scene_pooling import ScenePoolingCNN
-from models.desire.SGM import SGM
-from models.desire.utils.params import DESIREParams
-from models.utils.maps.rasterize import Rasterizer
+from models.desire.ioc_modules.IOC import IOC
+from models.desire.ioc_modules.scene_pooling import ScenePoolingCNN
+from models.desire.sgm_modules.SGM import SGM
+from models.desire.params import DESIREParams
+from data.map.rasterize import Rasterizer
+
+from utils.config import TRAIN_BBOX
 
 class DESIRE(nn.Module):
     def __init__(self, params: DESIREParams):
@@ -13,8 +15,7 @@ class DESIRE(nn.Module):
         self.pred_len = params.pred_len
         self.num_refine_iters = params.num_refine_iters
 
-        # TODO config
-        self.rasterizer = Rasterizer([10.12, 54.31, 10.33, 54.46], pos_res = 10)
+        self.rasterizer = Rasterizer(TRAIN_BBOX, pos_res = 10)
 
         self.CNN = ScenePoolingCNN(params)
         self.SGM = SGM(params)

@@ -4,6 +4,10 @@ from models.traisformer.model import TrAISformer
 from sklearn.mixture import GaussianMixture
 
 class AIS_GMM(nn.Module):
+    """
+    Wrapper around Sklearn GaussianMixture.
+    Clustering the hidden state of a TrAISfromer trained to predict the destionation.
+    """
     def __init__(self, prior_model: TrAISformer, n_clusters):
         super().__init__()
         self.prior_model = prior_model
@@ -46,21 +50,3 @@ class AIS_GMM(nn.Module):
 
         probs = self.gmm.predict_proba(z)
         return probs
-    
-class MAP_GMM(nn.Module):
-    def __init__(self, gmm: AIS_GMM, cluster_maps):
-        super().__init__()
-        self.gmm = gmm
-        self.cluster_maps = cluster_maps
-
-    def forward(self, data, scene):
-        cluster_prob = self.gmm.predict_proba(data, scene)
-        cluster_prob = torch.tensor(cluster_prob, device=self.cluster_maps.device)
-
-        density_map = torch.einsum(
-            "bk,khw->bhw",
-            cluster_prob,
-            self.cluster_maps
-        ).unsqueeze(1)
-        
-        return density_map, None

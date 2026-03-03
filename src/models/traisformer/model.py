@@ -2,10 +2,12 @@ import torch
 import torch.nn as nn
 
 from models.traisformer.params import TraisformerParams
-from models.utils.maps.rasterize import Rasterizer
-from models.traisformer.transformer_block import Block
-from models.traisformer.map_encoder import ScenePoolingCNN
-from models.traisformer import heatmap_head
+from data.map.rasterize import Rasterizer
+from models.traisformer.modules.transformer_block import Block
+from models.traisformer.modules.map_cnn import ScenePoolingCNN
+from models.traisformer.modules import heatmap_head
+
+from utils.config import TRAIN_BBOX
 
 HEAD_REGISTRY = {
     "linear": heatmap_head.LinearHead,
@@ -16,12 +18,14 @@ HEAD_REGISTRY = {
 }
 
 class TrAISformer(nn.Module):
-    """Transformer for AIS trajectories."""
-
+    """
+    Transformer for AIS trajectories.
+    Adapted to predict heatmaps of the full future path or destination of a vessel.
+    """
     def __init__(self, config: TraisformerParams):
         super().__init__()
         self.config = config
-        self.rasterizer = Rasterizer(config.bbox)
+        self.rasterizer = Rasterizer(TRAIN_BBOX)
         self.x_size, self.y_size, sog_size, cog_size, acc_size, rot_size = (
             self.rasterizer.get_total_grid_sizes()
         )
@@ -48,6 +52,7 @@ class TrAISformer(nn.Module):
 
         # pooling
         self.ln_f = nn.LayerNorm(config.n_embd)
+
         # LinearHead, FactorizedHead, CNNHead, MixtureHead
         head_cls = HEAD_REGISTRY[config.intent_head]
         self.intent_head = head_cls(config.n_embd, self.x_size, self.y_size, config.k_rank)
@@ -100,6 +105,7 @@ class TrAISformer(nn.Module):
             fea = blk(fea, full_mask)
         fea = self.ln_f(fea)
 
+        # select context token
         z = fea[:, 0, :]
         logits = self.intent_head(z)
 

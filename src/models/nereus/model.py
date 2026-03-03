@@ -1,25 +1,35 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-from models.nereus.scene import ScenePoolingCNN, MapAttention
+from models.nereus.map_modules.map import ScenePoolingCNN
 from models.nereus.params import NEREUSParams
-from models.utils.rnn import GRUEncoder, MDNDecoder
+from models.gru.modules.encoder import GRUEncoder
+from models.gru.modules.decoder import MDNDecoder
 from torch_geometric.data import Data
-from models.utils.maps.rasterize import Rasterizer
+from data.map.rasterize import Rasterizer
+
+from utils.config import TRAIN_BBOX
 
 class NEREUS(nn.Module):
+    """
+    NEREUS model consisting of different Modules:
+        - Encoder   (GRU)
+        - Static    (linear)
+        - Social    (GAT, SocialPooling)
+        - Map       (ScenePoolingCNN, MapAttention)
+        - Prior     (Traisformer, DensityMap, MAP_GMM)
+        - Decoder   (MDN)
+    """
     def __init__(
-            self, 
-            config: NEREUSParams, 
+            self,
+            config: NEREUSParams,
             static_module: bool = True,
-            social_module = None, 
-            map_module = None, 
+            social_module = None,
+            map_module = None,
             prior_module = None,
-            map_atte_module = None,
         ):
         super().__init__()
-        self.rasterizer = Rasterizer(config.bbox, pos_res=config.map_res)
+        self.rasterizer = Rasterizer(TRAIN_BBOX, pos_res=config.map_res)
 
         # ENCODER
         self.encoder = GRUEncoder(config.rnn_hidden_size, config.node_feat_dim)
@@ -39,14 +49,8 @@ class NEREUS(nn.Module):
             module_count += 1
 
         # MAP
-        self.map_module = map_module
-        if self.map_module:
-            self.map_cnn = ScenePoolingCNN(
-                self.rasterizer, 
-                radius=config.map_radius, 
-                in_channels=4, 
-                out_channels=config.map_cnn_out
-            )
+        self.map_cnn = map_module
+        if self.map_cnn:
             self.map_proj = nn.Linear(config.map_cnn_out, config.rnn_hidden_size)
             module_count += 1
 
@@ -55,24 +59,11 @@ class NEREUS(nn.Module):
         if self.prior_module:
             self.prior_cnn = ScenePoolingCNN(
                 self.rasterizer, 
-                radius=config.map_radius, 
-                in_channels=1, 
+                config=config,
+                in_channels=1,
                 out_channels=config.prior_cnn_out
             )
             self.prior_proj = nn.Linear(config.prior_cnn_out, config.rnn_hidden_size)
-            module_count += 1
-
-        # MAP
-        self.map_atte_module = map_atte_module
-        if self.map_atte_module:
-            self.map_cnn = MapAttention(
-                self.rasterizer, 
-                radius=config.map_radius, 
-                in_channels=4, 
-                out_channels=config.map_cnn_out,
-                query_dim=config.rnn_hidden_size,
-            )
-            self.map_proj = nn.Linear(config.map_cnn_out, config.rnn_hidden_size)
             module_count += 1
 
         # DECODER
@@ -101,25 +92,24 @@ class NEREUS(nn.Module):
             h_social = self.gnn_proj(h_social[ego_idx])
             h_stack.append(h_social.unsqueeze(0))
 
-        if self.map_module:
-            maps_v = maps.unsqueeze(0).expand(B, -1, -1, -1)
-            h_map = self.map_cnn(maps_v, abs_pos)
-            h_map = self.map_proj(h_map)
-            h_stack.append(h_map.unsqueeze(0))
-
+        ### workaround to keep checkpoint working
         if self.prior_module:
             with torch.no_grad():
                 prior_map, _ = self.prior_module(data, maps)
-
             h_prior = self.prior_cnn(prior_map, abs_pos)
             h_prior = self.prior_proj(h_prior)
-            h_stack.append(h_prior.unsqueeze(0))
+        else:
+            h_prior = None
 
-        if self.map_atte_module:
+        if self.map_cnn:
             maps_v = maps.unsqueeze(0).expand(B, -1, -1, -1)
             h_map = self.map_cnn(maps_v, abs_pos, h_prior)
             h_map = self.map_proj(h_map)
             h_stack.append(h_map.unsqueeze(0))
+
+        if self.prior_module:
+            h_stack.append(h_prior.unsqueeze(0))
+        ###
 
         w = torch.softmax(self.w, dim=0)
         h_stack = torch.stack([torch.tanh(h) for h in h_stack], dim=0)
@@ -127,3 +117,6 @@ class NEREUS(nn.Module):
         h = self.dropout_layer(h)
 
         return self.decoder(rel_pos_t0, h)
+    
+    def inference(self, data: Data, maps=None):
+        return self.forward(data, maps)

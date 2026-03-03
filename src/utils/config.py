@@ -1,65 +1,18 @@
-import os
-import shutil
-import threading
 from pathlib import Path
 
-import yaml
 # DATA_FOLDER_PATH = Path("/data/projects/ship_tracker/assets")
 DATA_FOLDER_PATH = Path("/home/bbi/nereus/assets")
+
+AIS_FOLDER_PATH = DATA_FOLDER_PATH / "ais/4_features/fh_10/kiel"
+MAP_FOLDER_PATH = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel"
 SHIP_DB_PATH = DATA_FOLDER_PATH / "ship_db/ship_db.parquet"
 
-AIS_SOURCE = "dma"
+AIS_SOURCE = "fh" # "fh" or "dma"
 
-STEP_SIZE = 10
+TRAIN_BBOX = [10.12, 54.31, 10.33, 54.46] # Training is done on Kiel
+DEFAULT_CRS = "EPSG:4326"
+AREA_CRS = "EPSG:3035"
+METER_CRS = "EPSG:25832"
+
+STEP_SIZE = 10 # interpolation step size from preprocessing
 STEPS_PER_MINUTE = 60 // STEP_SIZE
-
-class Config:
-    _instance = None
-    _lock = threading.Lock()
-    _path = Path(".bin/config.yaml").resolve()
-    _subconfigs = {}
-
-    def __new__(cls, path=None):
-        with cls._lock:
-            if path is not None:
-                cls._copy_to_bin(cls, path)
-            if cls._instance is None:
-                cls._instance = super().__new__(cls)
-                cls._instance._initialize()
-        return cls._instance
-
-    def get(self, subconfig):
-        try:
-            return self._subconfigs[subconfig]
-        except KeyError:
-            raise KeyError(f"There is no subconfig named '{subconfig}'.")
-
-    def _initialize(self):
-        main_config = self._load_main_config()
-        for name, path in main_config["config"].items():
-            self._subconfigs[name] = self._load_config(path)
-        self._load_folder(main_config["folder"])
-
-    def _copy_to_bin(self, path):
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Config file not found: {path}")
-        os.makedirs(self._path.parent, exist_ok=True)
-        shutil.copy(path, self._path)
-
-    def _load_main_config(self):
-        if not os.path.exists(self._path):
-            raise FileNotFoundError("Config was not initialized")
-        with open(self._path, "r") as f:
-            return yaml.safe_load(f)
-
-    def _load_config(self, path):
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Config file not found: {path}")
-        with open(path, "r") as f:
-            return yaml.safe_load(f)
-
-    def _load_folder(self, folders):
-        self.folder = {}
-        for name, path in folders.items():
-            os.makedirs(Path(path).resolve(), exist_ok=True)
-            self.folder[name] = Path(path).resolve()

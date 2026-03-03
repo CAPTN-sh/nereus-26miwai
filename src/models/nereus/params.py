@@ -19,9 +19,7 @@ class NEREUSParams:
     gnn_n_head: int = 4
     max_dist: int = 500
 
-    # bbox
-    # TODO from config
-    bbox = [10.12, 54.31, 10.33, 54.46]
+    map_cnn_in: int = 4
     map_cnn_out: int = 128
     map_radius: int = 500
     map_res: int = 50

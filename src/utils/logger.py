@@ -26,7 +26,7 @@ def logger(file_prefix: str = "run", log_dir: str = ".logs", level=logging.INFO)
 
     logging.info("Logger initialized. Writing logs to %s", logfile)
 
-# ---------- JSONL logging (multi-process safe via file lock) ----------
+
 def _append_jsonl_atomic(jsonl_path: Path, record: dict):
     """
     Append one JSON object per line to jsonl_path.

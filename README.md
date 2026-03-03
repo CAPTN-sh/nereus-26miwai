@@ -4,144 +4,31 @@
 To install all the requirements, one needs to first install:
 + conda
 
+#### linux server
 The proper installation must then be done with conda.
 
 conda create -n nereus_env python=3.11 -y
 conda activate nereus_env
 
-#### linux server
-
 export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu124"
 export PIP_FIND_LINKS="https://data.pyg.org/whl/torch-2.5.1+cu124.html"
 pip install -e .
 
-torchrun --standalone --nproc_per_node=4 --master_port=29515 src/train/train_server.py
-
-#### local windows
-
-pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu `
-  torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1
-
-pip install --no-deps --prefer-binary --only-binary=:all: --no-cache-dir `
-  torch-scatter==2.1.2 -f https://data.pyg.org/whl/torch-2.5.1+cpu.html
-
-pip install -e .
-
 ## Structure
-The project is structured in a way that allows for easy addition of new pipelines and tasks. 
-### ``preprocessing`` branch 
-The main components are:
-```bash
-.
-|-- data
-|   `-- kiel
-|       |-- ais
-|       |   |-- 1_raw
-|       |   |-- 2_decoded
-|       |   `-- 3_features
-|       |-- maps
-|       |   |-- kiel_buoys.geojson
-|       |   |-- kiel_fjord_epsg4326.geojson
-|       |   `-- kiel_marinas.geojson
-|       `-- ship_db
-|           `-- ship_type_dict.yaml
-|-- .flake8
-|-- .gitignore
-|-- .history
-|-- images
-|-- Makefile
-|-- playground
-|-- pyproject.toml
-|-- README.md
-|-- src
-|   |-- main.py
-|   |-- preprocessing
-|   |   |-- configs
-|   |   |   |-- decode.yaml
-|   |   |   |-- _main.yaml
-|   |   |   |-- transform_edges.yaml
-|   |   |   `-- transform_nodes.yaml
-|   |   |-- steps
-|   |   |   |-- decoding
-|   |   |   |   |-- decoder.py
-|   |   |   |   `-- pipeline.py
-|   |   |   `-- transform
-|   |   |       |-- edges
-|   |   |       |   |-- metrics.py
-|   |   |       |   |-- pipeline.py
-|   |   |       |   `-- ship.py
-|   |   |       `-- nodes
-|   |   |           |-- geo_features.py
-|   |   |           |-- interpolate.py
-|   |   |           |-- pipeline.py
-|   |   |           |-- trajectory.py
-|   |   |           `-- wrapper.py
-|   |   `-- utils
-|   |       |-- df_transformer.py
-|   |       |-- pipeline
-|   |       |   |-- function_inport.py
-|   |       |   |-- pipeline_executor.py
-|   |       |   `-- pipeline.py
-|   |       `-- ship_info_system
-|   |           |-- ship_info.py
-|   |           `-- webcrawler.py
-|   `-- utils
-|       |-- config.py
-|       `-- map_reader.py
-|-- tools.yml
-`-- _version.py
-```
 
-### Description of Core Modules
+data: DataLoader (AIS trajectories) and SceneLoader (Context Maps, Density Maps, ...)
+eval: full evaluation scripts and eval functions used for tuning
+models:
+  - desire: implementation adapted from https://github.com/AkashGanesan/desire-pytorch
+  - gmm: clutering to generate density maps
+  - gru: baseline model
+  - nereus: main model with its map-, interaction-, and prior-modules
+  - traisfromer: implementation adapted from https://github.com/CIA-Oceanix/TrAISformer
+plots: loose plot funktions 
+train: full training and tuning scripts
+utils: config and logger
 
-#### 🧠 `main.py` + `_main.yaml`
-- Entry point to the preprocessing system.
-- Loads pipeline definitions from `_main.yaml` and initializes processing steps accordingly.
+## Data
 
-#### ⚙️ `pipeline_executor.py`
-- Coordinates **multiprocessing** for task execution.
-- Iteratively loads tasks from YAML configuration and executes them in **parallel**.
-
----
-
-### Pipelines
-
-#### 🔍 `decoding/pipeline.py` + `decode.yaml` → `decoder.py`
-- Decodes raw AIS data and stores results in daily tables.
-- Configured via `decode.yaml`.
-- Output is structured, cleaned, and stored per day.
-
-#### 📌 `transform/nodes/pipeline.py` + `transform_nodes.yaml` → `trajectory.py`
-- Extracts classic features from individual ship trajectories.
-- `trajectory.py` is the core logic module:
-  - Supports arbitrary functions (must take a trajectory and return a trajectory).
-  - Supports built-in methods from `movingpandas.Trajectory`.
-- Enriches data with web-scraped ship info via `ship_info_system`.
-
-#### 🧭 `transform/edges/pipeline.py` + `transform_edges.yaml` → `ship.py`
-- Computes **pairwise features** between ships within a given proximity (e.g. 1000m).
-- `ship.py` contains feature logic.
-- Currently hardcoded; planned to be generalized via config like nodes.
-
----
-
-### Utilities
-
-#### 🧰 `utils/pipeline/`
-- Tools for dynamic function import (`function_inport.py`) and generic pipeline infrastructure (`pipeline.py`).
-- `pipeline_executor.py` uses these components to orchestrate execution.
-
-#### 🌐 `utils/ship_info_system/`
-- Fetches vessel metadata from external web sources.
-- Contains scraping and ship info logic.
-
-#### 🧾 `df_transformer.py`
-- General-purpose transformer functions for working with pandas dataframes in the pipelines.
-
-#### 📍 `map_reader.py`
-- Loads and manages static geo-referenced data (e.g., buoys, marinas, regions) used in preprocessing.
-
-## git resources
-# desire-torch
-https://github.com/AkashGanesan/desire-pytorch
-Implementation of DESIRE and enhancements
+data from preprocessing 
+see https://cau-git.rz.uni-kiel.de/inf/intern/ag-tomforde/gfalouji/autonomous.maritime/nereus/ais.processing
