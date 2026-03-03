@@ -6,14 +6,14 @@ To install all the requirements, one needs to first install:
 
 ### linux server
 The proper installation must then be done with conda.
-
+<pre>
 conda create -n nereus_env python=3.11 -y
 conda activate nereus_env
 
 export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu124"
 export PIP_FIND_LINKS="https://data.pyg.org/whl/torch-2.5.1+cu124.html"
 pip install -e .
-
+</pre>
 ## 📁 Structure
 
 - data: DataLoader (AIS trajectories) and SceneLoader (Context Maps, Density Maps, ...)
