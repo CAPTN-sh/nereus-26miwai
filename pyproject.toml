@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nereus"
+version = "1.0.0"
+license = { file = "LICENSE" }
+description = "Dependencies for Nautical Environment-aware Route Estimation Under Uncertainty for Surface Vessels"
+readme =  { file = "README.md", content-type = "text/markdown" }
+authors = [
+    { name = "Ben Biesenbach", email = "stu232913@mail.uni-kiel.de" },
+    { name = "Ghassan Al-Falouji", email = "gaf@informatik.uni-kiel.de" }
+]
+requires-python = ">=3.11,<3.13"
+dynamic = ["dependencies"]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["*"]
+exclude = ["tests*", "test*", "examples*"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+optional-dependencies = {jupyter = { file = ["requirements-jupyter.txt"] }, lint = { file = ["requirements-lint.txt"] }}

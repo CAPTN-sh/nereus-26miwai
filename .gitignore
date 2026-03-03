@@ -1,0 +1,21 @@
+# generated files
+*.png
+*.pth
+*nmea.txt
+*parquet
+data/*
+src/models/zzzz_desire_o/*
+*.db
+*.jsonl
+# hidden folders and cache
+.*
+__pycache__
+playground/
+
+# build files
+*.egg-info/
+.markdownlint.json
+environment.yml#
+Makefile
+_version.py
+.flake8
