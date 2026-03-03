@@ -1,7 +1,6 @@
 from pathlib import Path
 
-# DATA_FOLDER_PATH = Path("/data/projects/ship_tracker/assets")
-DATA_FOLDER_PATH = Path("/home/bbi/nereus/assets")
+DATA_FOLDER_PATH = Path("/data/projects/ship_tracker/assets")
 
 AIS_FOLDER_PATH = DATA_FOLDER_PATH / "ais/4_features/fh_10/kiel"
 MAP_FOLDER_PATH = DATA_FOLDER_PATH / "maps/2_standardized/fh_10/kiel"

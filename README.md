@@ -35,6 +35,10 @@ pip install -e .
 data from preprocessing 
 see https://cau-git.rz.uni-kiel.de/inf/intern/ag-tomforde/gfalouji/autonomous.maritime/nereus/ais.processing
 
+preprocessed data available at "/data/projects/ship_tracker/assets" 
+
+(models where trained on fh_10 and eval on fh_10 / dma_10)
+
 ## 🪶 Authors
 
 * [Ben Biesenbach](stu232913@mail.uni-kiel.de)

@@ -6,6 +6,8 @@ tqdm
 pyyaml
 matplotlib
 pyarrow
+optuna
+scikit-learn
 
 # ---- geo stack ----
 geopandas
@@ -22,3 +24,4 @@ movingpandas
 torch==2.5.1
 torchvision==0.20.1
 torch_scatter
+torch_geometric
