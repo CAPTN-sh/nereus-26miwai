@@ -1,4 +1,6 @@
 # ⛵ Context-aware probabilistic ship trajectory forecasting
+Repository for tuning, training and evaluating multiple ship trajectory forecasting models. 
+
 
 ## ⚙️ Requirements
 To install all the requirements, one needs to first install:
