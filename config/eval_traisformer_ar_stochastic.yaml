@@ -1,0 +1,19 @@
+# Same checkpoint as eval_traisformer_ar.yaml, decoded differently: row 0 of the
+# rollout (behind the ade/fde columns) becomes a single stochastic sample instead of
+# the default greedy argmax. Eval-time only -- no retraining. See TraisformerAR.inference
+# and TraisformerARParams.greedy_best. Writes to eval_fh_stochastic.csv, next to the
+# default run's eval_fh.csv, so both survive.
+source: fh       # "fh" (Kiel) | "dma" (Aarhus, Odense, Little Belt)
+device: 0
+
+regions:
+  kiel: [10.12, 54.31, 10.33, 54.46]
+  # aarhus:      [10.21, 56.04, 10.47, 56.17]  # requires source: dma
+  # odense:      [10.42, 55.42, 10.68, 55.55]  # requires source: dma
+  # little_belt: [9.64,  55.25,  9.90, 55.37]  # requires source: dma
+
+checkpoint_glob: "lightning_logs/traisformer_ar/*/best.ckpt"
+
+csv_suffix: "_stochastic"
+model_overrides:
+  greedy_best: false

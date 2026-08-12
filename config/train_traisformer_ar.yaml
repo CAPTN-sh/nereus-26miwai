@@ -1,0 +1,66 @@
+# TrAISformer as published (Nguyen & Fablet, arXiv:2109.03958): a causal transformer
+# over discretised (x, y, SOG, COG) tokens, decoded autoregressively.
+#
+# This is the trajectory-predicting variant, so it reports ADE/FDE and belongs in the
+# comparison table. The single-shot heatmap variant (model: TRAISFORMER) predicts path
+# occupancy or a destination cell instead and has no time axis -- it is the NEREUS prior.
+#
+# Run with:
+#   .venv/bin/python -u src/train/train_yaml.py config/train_traisformer_ar.yaml
+defaults:
+  model: TRAISFORMER_AR
+
+  # Overrides for ISSTGCNNParams' sibling, TraisformerARParams.
+  # STEPS_PER_MINUTE = 6  (step_size=10s -> 6 steps/min)
+  cfg:
+    pred_len: 30            # 5 min
+    obs_len: 60             # 10 min
+    max_dist: 0             # single-vessel model: no neighbour edges
+
+    # Cell size puts a hard floor of ~0.38 * pos_res on ADE (~10 m here, ~19 m at 50 m).
+    # x and y have separate softmaxes, so a finer grid costs only linearly more
+    # parameters -- 25x finer is 1.9x the step time -- but multiplies the classes to
+    # learn, so finer is not automatically better. See the sweep at the bottom.
+    pos_res: 25
+
+    # Per-attribute embedding widths. n_embd must equal their sum (asserted at build).
+    n_x_embd: 96
+    n_y_embd: 96
+    n_sog_embd: 32
+    n_cog_embd: 32
+    n_embd: 256
+    n_head: 8
+    n_layer: 4
+    dropout: 0.1
+    attn_dropout: 0.1
+
+    # Decoding. best/ade comes from the greedy rollout; k_ade/k_fde from num_samples
+    # sampled rollouts, which is what the paper's best-of-N numbers correspond to.
+    num_samples: 3
+    temperature: 1.0
+    top_k: null             # null = sample from the full distribution
+    sample_mode: vicinity   # vicinity (the paper's pos_vicinity) | full
+    r_vicinity: 8           # max cell displacement per step and axis (8 * 25 m = 200 m;
+                            # largest observed step in the data is 139 m). Retune with pos_res.
+
+  training:
+    lr: 6.0e-4
+    weight_decay: 1.0e-5
+    batch_size: 256
+    max_epochs: 30
+    device_id: 2
+    early_stopping_patience: 3
+    max_seconds: 36000      # 10 h wall-clock budget, as for the other baselines
+
+  experiment: traisformer_ar
+
+# Cell size is the one hyperparameter unique to this model, and it is cheap: 2 m cells
+# still train at 37 ms/batch against 20 ms at 50 m. Uncomment to sweep it -- each group
+# holds single-valued lists, so it expands to exactly one run per cell size.
+# combinations:
+#   - cfg.pos_res: [10]
+#     cfg.r_vicinity: [20]
+#   - cfg.pos_res: [25]
+#     cfg.r_vicinity: [8]
+#   - cfg.pos_res: [50]
+#     cfg.r_vicinity: [4]

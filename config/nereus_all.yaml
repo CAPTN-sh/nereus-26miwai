@@ -1,0 +1,65 @@
+defaults:
+  model: NEREUS
+
+  nereus_modules:
+    social: null
+    map: null
+    prior: null
+
+  # Overrides for NEREUSParams fields.
+  # STEPS_PER_MINUTE = 6  (step_size=10s → 6 steps/min)
+  cfg:
+    pred_len: 30            # 5 min  (5 * STEPS_PER_MINUTE)
+    obs_len: 60             # 10 min (10 * STEPS_PER_MINUTE)
+    node_feat_dim: 8
+    static_feat_dim: 8
+    edge_feat_dim: 25
+    mdn_modes: 3
+    rnn_hidden_size: 256
+    gnn_hidden_size: 64
+    gnn_n_head: 4
+    max_dist: 500
+    map_cnn_in: 4
+    map_cnn_out: 128
+    map_radius: 500
+    map_res: 50
+    prior_cnn_out: 128
+    prior_pred_scope: path  # path | destination
+
+  training:
+    lr: 3.0e-4
+    weight_decay: 1.0e-5
+    batch_size: 1024
+    max_epochs: 30
+    device_id: 2
+    early_stopping_patience: 3
+    max_seconds: 36000
+
+  experiment: nereus_ablation
+
+  # Post-training evaluation across regions.
+  # source: "fh" (Kiel only) | "dma" (Aarhus, Odense, Little Belt)
+  # Omit eval or leave regions empty to skip and fall back to trainer.test().
+  eval:
+    source: fh
+    regions:
+      kiel: [10.12, 54.31, 10.33, 54.46]
+      # aarhus:      [10.21, 56.04, 10.47, 56.17]  # requires source: dma
+      # odense:      [10.42, 55.42, 10.68, 55.55]  # requires source: dma
+      # little_belt: [9.64,  55.25,  9.90, 55.37]  # requires source: dma
+
+# All allowed module combinations (30 total).
+# Constraint: map requires prior (assertion in NEREUS.__init__).
+#
+# Group 1 (12 runs): map=null, prior unrestricted
+#   3 social × 4 prior(null|density|path|cluster) × map=null
+#
+# Group 2 (18 runs): map active, prior must be non-null
+#   3 social × 3 prior(density|path|cluster) × 2 map(cnn|atte)
+combinations:
+  - nereus_modules.social: [gat, pool, null]
+    nereus_modules.map: [null]
+    nereus_modules.prior: [null, density, path, cluster]
+  - nereus_modules.social: [gat, pool, null]
+    nereus_modules.map: [cnn, atte]
+    nereus_modules.prior: [density, path, cluster]

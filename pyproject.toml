@@ -1,0 +1,97 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nereus"
+version = "1.0.0"
+license = { file = "LICENSE" }
+description = "Dependencies for Nautical Environment-aware Route Estimation Under Uncertainty for Surface Vessels"
+readme =  { file = "README.md", content-type = "text/markdown" }
+authors = [
+    { name = "Ben Biesenbach", email = "stu232913@mail.uni-kiel.de" },
+    { name = "Ghassan Al-Falouji", email = "gaf@informatik.uni-kiel.de" }
+]
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "affine>=2.4.0",
+    "debugpy>=1.8.20",
+    "geopandas>=1.1.3",
+    "ipykernel>=7.2.0",
+    "kaleido>=1.3.0",
+    "matplotlib>=3.10.9",
+    "nbformat>=5.10.4",
+    "numpy>=2.4.4",
+    "optuna>=4.8.0",
+    "pandas>=3.0.2",
+    "plotly>=6.8.0",
+    "polars>=1.40.1",
+    "pyais>=3.0.0",
+    "pyarrow>=24.0.0",
+    "pyogrio>=0.12.1",
+    "pytorch-lightning>=2.6.1",
+    "pyyaml>=6.0.3",
+    "rasterio>=1.4.4",
+    "scikit-learn>=1.8.0",
+    "scipy>=1.17.1",
+    "shapely>=2.1.2",
+    "tbparse>=0.0.9",
+    "tensorboardx>=2.6.5",
+    "torch>=2.11.0",
+    "torch-geometric>=2.7.0",
+    "tqdm>=4.67.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.15.12",
+]
+#dynamic = ["dependencies"]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["*"]
+exclude = ["tests*", "test*", "examples*"]
+
+#[tool.setuptools.dynamic]
+#dependencies = {file = ["requirements.txt"]}
+#optional-dependencies = {jupyter = { file = ["requirements-jupyter.txt"] }, lint = { file = ["requirements-lint.txt"] }}
+
+[tool.ruff]
+lint.select = ["ALL"]
+lint.ignore = [
+    # flake8-todos
+    "TD",
+    # flake8-fixme
+    "FIX",
+    # pandas-vet
+    "PD",
+    # Pylint
+    #"PLR0911",
+    #"PLR0912",
+    #"PLR0913",
+    #"PLR0915",
+    #"PLR2004",
+    #"PLW2901",
+    # Perflint (PERF)
+    "PERF",
+    # flake8-logging-format
+    "G004",
+    # ignore this because of warning by ruff
+    "COM812",
+    #Pickle
+    "S301",
+    "S506",
+    #print
+    "T201",
+    "ANN401",# -> Any
+]
+
+line-length = 120
+include = [
+    "src/**/*.py",
+    ]

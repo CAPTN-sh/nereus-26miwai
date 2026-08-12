@@ -1,0 +1,20 @@
+# Same checkpoint as eval_traisformer_ar.yaml, decoded with num_samples=16 instead of
+# the trained default (3) -- eval-time only, no retraining (num_samples only controls
+# how many rollouts inference() generates; it isn't baked into any learned parameter).
+# k_ade/k_fde over 16 stochastic samples (k_rel excludes the greedy row -- see
+# TrAISformerAR.inference) directly matches the paper's best-of-16 headline metric.
+# Writes to eval_fh_n16.csv, next to the default run's eval_fh.csv, so both survive.
+source: fh       # "fh" (Kiel) | "dma" (Aarhus, Odense, Little Belt)
+device: 0
+
+regions:
+  kiel: [10.12, 54.31, 10.33, 54.46]
+  # aarhus:      [10.21, 56.04, 10.47, 56.17]  # requires source: dma
+  # odense:      [10.42, 55.42, 10.68, 55.55]  # requires source: dma
+  # little_belt: [9.64,  55.25,  9.90, 55.37]  # requires source: dma
+
+checkpoint_glob: "lightning_logs/traisformer_ar/*/best.ckpt"
+
+csv_suffix: "_n16"
+model_overrides:
+  num_samples: 16

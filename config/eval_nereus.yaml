@@ -1,0 +1,44 @@
+source: fh       # "fh" (Kiel) | "dma" (Aarhus, Odense, Little Belt)
+device: 1
+
+regions:
+  kiel: [10.12, 54.31, 10.33, 54.46]
+  # aarhus:      [10.21, 56.04, 10.47, 56.17]  # requires source: dma
+  # odense:      [10.42, 55.42, 10.68, 55.55]  # requires source: dma
+  # little_belt: [9.64,  55.25,  9.90, 55.37]  # requires source: dma
+
+# Explicit list — evaluated in order, dataset cached across runs:
+checkpoints:
+  - lightning_logs/nereus_ablation/version_0/best.ckpt
+  - lightning_logs/nereus_ablation/version_1/best.ckpt
+  - lightning_logs/nereus_ablation/version_2/best.ckpt
+  - lightning_logs/nereus_ablation/version_3/best.ckpt
+  - lightning_logs/nereus_ablation/version_4/best.ckpt
+  - lightning_logs/nereus_ablation/version_5/best.ckpt
+  - lightning_logs/nereus_ablation/version_6/best.ckpt
+  - lightning_logs/nereus_ablation/version_7/best.ckpt
+  - lightning_logs/nereus_ablation/version_8/best.ckpt
+  - lightning_logs/nereus_ablation/version_9/best.ckpt
+  - lightning_logs/nereus_ablation/version_10/best.ckpt
+  - lightning_logs/nereus_ablation/version_11/best.ckpt
+  - lightning_logs/nereus_ablation/version_12/best.ckpt
+  - lightning_logs/nereus_ablation/version_13/best.ckpt
+  - lightning_logs/nereus_ablation/version_14/best.ckpt
+  - lightning_logs/nereus_ablation/version_15/best.ckpt
+  - lightning_logs/nereus_ablation/version_16/best.ckpt
+  - lightning_logs/nereus_ablation/version_17/best.ckpt
+  - lightning_logs/nereus_ablation/version_18/best.ckpt
+  - lightning_logs/nereus_ablation/version_19/best.ckpt
+  - lightning_logs/nereus_ablation/version_20/best.ckpt
+  - lightning_logs/nereus_ablation/version_21/best.ckpt
+  - lightning_logs/nereus_ablation/version_22/best.ckpt
+  - lightning_logs/nereus_ablation/version_23/best.ckpt
+  - lightning_logs/nereus_ablation/version_24/best.ckpt
+  - lightning_logs/nereus_ablation/version_25/best.ckpt
+  - lightning_logs/nereus_ablation/version_26/best.ckpt
+  - lightning_logs/nereus_ablation/version_27/best.ckpt
+  - lightning_logs/nereus_ablation/version_28/best.ckpt
+  - lightning_logs/nereus_ablation/version_29/best.ckpt
+
+# Alternative: glob pattern (appended after the list above):
+# checkpoint_glob: "lightning_logs/nereus_ablation/*/checkpoints/best.ckpt"
