@@ -1,8 +1,7 @@
 # Reproducing the results
+This file records the exact commands, so results can be regenerated (or checked) end to end.
+Some models are inherently stochastic, so exact metrics may not match with repeated experiments, unless strictly seeded.
 
-Every number in `paper_table.csv` / `summary.md` comes from a real `full_eval_nereus.py`
-run against a real trained checkpoint — nothing here is hand-computed. This file records
-the exact commands, so results can be regenerated (or checked) end to end.
 
 ## 1. Training
 
@@ -34,16 +33,6 @@ GRU was evaluated directly against its single checkpoint (no sweep needed):
 uv run python src/eval/full_eval_nereus.py lightning_logs/baselines/version_4/best.ckpt --regions kiel
 ```
 
-All eval runs use `--regions kiel` (the training region) and the `fh` (Kiel Fjord) AIS
-source, matching the paper.
-
-**Note on TrAISformer-AR:** it can only be evaluated on its training region — its
-position embeddings are absolute grid cells, not a swappable rasterizer (see
-`src/models/traisformer/model_ar.py`'s docstring / `_check_grid`). `swap_rasterizer` in
-`full_eval_nereus.py` used to silently drop the model's own `pos_res` on any region swap
-(defaulting to 50 instead of TrAISformer-AR's trained 25), which broke evaluation even on
-the *same* region — fixed in this cleanup pass.
-
 **TrAISformer-AR decoding comparison** (`results/traisformer_ar_decoding.csv`, see the
 README caveat): the same checkpoint evaluated twice, differing only in how the row-0
 ("best") rollout is decoded —
@@ -58,13 +47,9 @@ uv run python src/eval/full_eval_nereus.py config/eval_traisformer_ar_stochastic
 ```
 uv run python scripts/analysis/training_stats.py                  # per-run step/epoch/wall-time + loss_curve.csv
 uv run python scripts/analysis/summarize_results.py \
-    --exclude-experiments nereus_ablation_continued desire_continued isstgcnn \
+    --exclude-experiments isstgcnn \
     > results/summary.md                                          # full comparison table (all runs)
 ```
-
-`nereus_ablation_continued` and `desire_continued` are earlier/resumed training runs
-superseded by the fresh `nereus_ablation` and `desire` runs above — excluded so the
-summary reflects final results only.
 
 `results/paper_table.csv` is the subset of `summary.md` matching `main.tex`'s
 `tab:nereus-metrics` (GRU, DESIRE, NEREUS_worst = all modules off, NEREUS_best = GAT +
@@ -73,6 +58,32 @@ IS-STGCNN is excluded — see the README caveat.
 
 NEREUS_worst/NEREUS_best identification: `nereus_ablation/version_8` is
 `social=-, map=-, prior=-` (paper's "all modules off"); `nereus_ablation/version_15` is
-`social=gat, map=atte, prior=density` (paper's best combination) — both confirmed via
-`hparams.yaml` in their respective run dirs, and version_15 also happens to be the
-empirically lowest-ADE config across all 30 ablations.
+`social=gat, map=atte, prior=density`.
+
+## 4. Model size / training cost / inference latency
+
+`results/model_stats_summary.csv` (params, FLOPs, GPU-timed inference latency, training
+steps/time for the 5 README headline models) was built from:
+
+```
+uv run python scripts/analysis/model_stats.py \
+    lightning_logs/baselines/version_4/best.ckpt \
+    lightning_logs/desire/version_0/best.ckpt \
+    lightning_logs/traisformer_ar/version_0/best.ckpt \
+    --out lightning_logs/model_stats                              # GRU/DESIRE/TrAISformer-AR only
+uv run python scripts/analysis/training_stats.py                  # (already run above; reused here)
+```
+
+NEREUS_worst/NEREUS_best params/FLOPs/latency reuse `lightning_logs/nereus_ablation/model_stats.csv`
+(the full 30-config ablation run, generated the same way against `config/eval_nereus.yaml`'s
+checkpoints). `model_stats.py` calls each model's actual `.inference()` method (not `.forward()`)
+for every model except NEREUS, matching how `full_eval_nereus.py` evaluates them.
+
+`results/plot_budget_capped_val_loss.png` plots `val_metric` from each budget-capped
+config's `loss_curve.csv` (the 9 `nereus_ablation` configs with `hit_time_budget=True`
+in `lightning_logs/training_stats.csv`, all `social=pool`) — shows all 9 still
+decreasing at cutoff, i.e. genuinely budget-limited rather than converged.
+
+`results/model_stats_all.csv` is the same params/FLOPs/latency/training-cost table as
+above, but for every checkpoint in the repo (all 30 NEREUS ablation configs plus
+GRU/DESIRE/TrAISformer-AR — 33 rows).
