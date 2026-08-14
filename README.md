@@ -1,45 +1,154 @@
-# ⛵ Context-aware probabilistic ship trajectory forecasting
-Repository for tuning, training and evaluating multiple ship trajectory forecasting models. 
+# NEREUS
+
+**N**autical **E**nvironment-aware **R**oute **E**stimation **U**nder uncertainty for **S**urface vessels — a modular probabilistic framework for context-aware ship trajectory forecasting.
+
+Code accompanying our MIWAI 2026 submission (citation to follow once the paper is public).
+
+## Setup
+
+```bash
+uv sync
+uv pip install torch-scatter -f https://data.pyg.org/whl/torch-2.11.0%2Bcu130.html
+```
+
+## Data
+
+Models are trained and evaluated on AIS trajectories from the Kiel Fjord (`fh_10` source).
+Raw AIS data is preprocessed by a [separate pipeline](https://github.com/CAPTN-sh/ais-processing-26miwai)
+We are unable to provide you with the Raw AIS data.
+
+### Splits
+
+Train/val/test is a random split at **day** granularity (fixed seed) — each calendar day
+is assigned wholesale to one split, so no trajectory spans two splits. Vessels are *not*
+split-disjoint: the same physical ship can have voyages in more than one split, since
+assignment depends on which days a vessel happened to sail, not on the vessel itself.
+
+| Split | Unique vessels (MMSI) | Voyages |
+|---|---|---|
+| Train | 7,429 | 91,671 |
+| Val | 2,665 | 13,369 |
+| Test | 4,053 | 23,356 |
+| **Union across splits** | **8,264** distinct MMSI | 128,396 |
+
+A "voyage" here is a per-day trajectory segment for a given (MMSI, `traj_id`) — a
+real voyage crossing midnight is segmented at the day boundary by construction, so this
+undercounts true port-to-port voyages.
+
+## Repository structure
+
+```
+src/
+  data/    AIS/map dataloaders (GraphTrajectoryDataset, SceneLoader, density/GMM maps)
+  models/  one directory per model — desire, gmm, gru, isstgcnn, nereus, traisformer
+  train/   training entry points (train_yaml.py, fit_gmm.py, continue_training.py, train_tune.py)
+  eval/    full_eval_nereus.py — the single evaluation entry point for every model below
+  utils/   config and logging
+config/    one train_*.yaml / eval_*.yaml pair per model
+scripts/analysis/   reporting utilities (training-time stats, results aggregation) — not
+                     part of the training/eval pipeline itself
+results/   the numbers below, plus REPRODUCE.md documenting the exact commands used
+lightning_logs/     per-run hparams.yaml, eval_fh.csv, and loss_curve.csv (train/val loss
+                     extracted from the raw TensorBoard logs). Checkpoints and the raw
+                     TensorBoard event files are not committed — retrain to regenerate them.
+```
+
+## Training
+
+```bash
+uv run python src/train/fit_gmm.py                                  # NEREUS prior-module prerequisite
+uv run python src/train/train_yaml.py config/nereus_all.yaml         # NEREUS, 30-config module ablation
+uv run python src/train/train_yaml.py config/train_gru.yaml          # GRU baseline
+uv run python src/train/train_yaml.py config/train_desire.yaml       # DESIRE baseline
+uv run python src/train/train_yaml.py config/train_traisformer_ar.yaml  # TrAISformer-AR baseline
+```
+
+## Evaluation
+
+`src/eval/full_eval_nereus.py` is the canonical evaluation entry point for every model
+in this repo (it dispatches on the checkpoint's model class); a YAML config sweeps every
+checkpoint in an experiment directory, and a single checkpoint path can also be passed
+directly:
+
+```bash
+uv run python src/eval/full_eval_nereus.py config/eval_nereus.yaml
+uv run python src/eval/full_eval_nereus.py config/eval_desire.yaml
+uv run python src/eval/full_eval_nereus.py config/eval_traisformer_ar.yaml
+uv run python src/eval/full_eval_nereus.py lightning_logs/baselines/version_4/best.ckpt --regions kiel
+```
+
+See `results/REPRODUCE.md` for the full command reference, including how each
+`lightning_logs/` experiment directory maps to its config.
+
+## Results
+
+ADE / minADE and FDE / minFDE (m) at 1/3/5 minutes, Kiel Fjord test set, all ship types
+(from `results/paper_table.csv`; **NEREUS_worst** = all optional modules off,
+**NEREUS_best** = GAT social module + attention map module + density-based prior):
+
+| Model | ADE | minADE | FDE@1min | minFDE@1min | FDE@3min | minFDE@3min | FDE@5min | minFDE@5min |
+|---|---|---|---|---|---|---|---|---|
+| GRU | 65.54 | 65.54 | 16.73 | 16.73 | 78.87 | 78.87 | 160.87 | 160.87 |
+| DESIRE | 66.22 | 66.00 | 17.05 | 16.94 | 80.02 | 79.73 | 160.18 | 159.58 |
+| TrAISformer-AR (K=4) | 77.55 | 55.07 | 23.29 | 18.03 | 91.20 | 61.34 | 187.01 | 116.28 |
+| TrAISformer-AR (K=16) | 77.55 | **34.73** | 23.29 | 12.42 | 91.20 | **32.87** | 187.00 | **60.24** |
+| NEREUS_worst | 61.45 | 46.88 | 13.67 | 10.76 | 74.22 | 54.08 | 154.56 | 109.16 |
+| **NEREUS_best** | **46.85** | 35.26 | **11.15** | **8.26** | **56.03** | 39.84 | **118.58** | 82.35 |
+
+The full 30-configuration module-ablation comparison is in `results/summary.md`, along
+with per-run TCPA/DCPA/collision-risk statistics.
+
+**Model size, training cost, and inference latency** (from `results/model_stats_summary.csv`,
+generated by `scripts/analysis/model_stats.py` + `scripts/analysis/training_stats.py`;
+inference latency is GPU-timed, batch size 32, 10 warmup + 50 measured passes):
+
+| Model | Params (M) | GFLOPs @bs32 | Inference (ms @bs32) | Training steps | Training time (h) |
+|---|---|---|---|---|---|
+| GRU | 0.47 | 1.16 | 8.67 | 42,199 | 1.27 |
+| DESIRE | 3.76 | 25.32 | 23.38 | 61,799 | 2.80 |
+| TrAISformer-AR | 3.64 | 82.41 | 51.26 | 191,349 | 3.18 |
+| NEREUS_worst | 0.48 | 1.88 | 7.86 | 67,499 | 1.88 |
+| NEREUS_best | 0.79 | 3.95 | 11.74 | 132,249 | 4.20 |
+
+The same table for every checkpoint in the repo — all 30 NEREUS ablation configs plus
+GRU/DESIRE/TrAISformer-AR (33 rows) — is in `results/model_stats_all.csv`.
+
+All models were trained under the same 10-hour wall-clock budget
+(`training.max_seconds: 36000`) with early stopping (patience 3); none of the 5 above
+actually hit that cap — the configs that do are all in the NEREUS ablation's `pool`
+social module (9 of the 30, see `results/summary.md`'s Hyperparameters section and
+`lightning_logs/training_stats.csv`'s `hit_time_budget` column).
+
+**TrAISformer-AR's minADE/minFDE at original sample count (K=16, matching the paper's
+own best-of-16 evaluation — see `results/METHODOLOGY.md`) beats the NEREUS architecture, but relies on the use of an oracle to decide the best trajectory. When using the same number of trajectories (K=4, NEREUS: 3 modes + 1 combination) NEREUS is superior.
 
 
-## ⚙️ Requirements
-To install all the requirements, one needs to first install:
-+ conda
+**IS-STGCNN is excluded from the results above.** Its implementation is likely faulty:
+it uses first-order Nomoto steering rather than the full MMG maneuvering model, and the
+social-sampling module's implementation details had to be guessed from the paper (see
+`src/models/isstgcnn/`). Numbers exist in `lightning_logs/isstgcnn/` for reference but
+should not be treated as a fair baseline comparison.
 
-### linux server
-The proper installation must then be done with conda.
-<pre>
-conda create -n nereus_env python=3.11 -y
-conda activate nereus_env
+**On TrAISformer-AR's ADE/minADE gap:** its `ade`/`fde` columns use greedy (argmax)
+decoding for the single reported trajectory, which is exactly the paper's own
+`TrAISformer_No-Stoch` ablation — the paper reports a ~3x degradation from this same
+greedy-vs-stochastic switch (Table I: 0.94 nmi stochastic best-of-16 vs. 2.88 nmi
+greedy, 2h horizon), so a worse `ade` than the sampled `k_ade` here is expected
+behavior for this architecture, not a bug. Two eval-time-only overrides (no retraining
+-- see `results/REPRODUCE.md`) let us probe this further on the same checkpoint
+(`results/traisformer_ar_decoding.csv`):
 
-export PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cu124"
-export PIP_FIND_LINKS="https://data.pyg.org/whl/torch-2.5.1+cu124.html"
-pip install -e .
-</pre>
-## 📁 Structure
+Our training loss also differs slightly from the paper: `loss_ar.py` sums the four
+per-attribute (lat/lon/SOG/COG) cross-entropies at the trained resolution only. The
+paper additionally adds a second cross-entropy term at a 3x coarser resolution
+(`β · CE(h'_t, l'_t)`, Algorithm 3), which they report gives a marginal improvement —
+not implemented here.
 
-- data: DataLoader (AIS trajectories) and SceneLoader (Context Maps, Density Maps, ...)
-- eval: full evaluation scripts and eval functions used for tuning
-- models:
-  - desire: implementation adapted from https://github.com/AkashGanesan/desire-pytorch
-  - gmm: clutering to generate density maps
-  - gru: baseline model
-  - nereus: main model with its map-, interaction-, and prior-modules
-  - traisfromer: implementation adapted from https://github.com/CIA-Oceanix/TrAISformer
-- plots: loose plot funktions 
-- train: full training and tuning scripts
-- utils: config and logger
+## Attribution
 
-## 🗄️ Data
+- DESIRE implementation adapted from [AkashGanesan/desire-pytorch](https://github.com/AkashGanesan/desire-pytorch).
+- TrAISformer implementation adapted from [CIA-Oceanix/TrAISformer](https://github.com/CIA-Oceanix/TrAISformer).
 
-data from preprocessing 
-see https://cau-git.rz.uni-kiel.de/inf/intern/ag-tomforde/gfalouji/autonomous.maritime/nereus/ais.processing
+## License
 
-preprocessed data available at "/data/projects/ship_tracker/assets" 
-
-(models where trained on fh_10 and eval on fh_10 / dma_10)
-
-## 🪶 Authors
-
-* [Ben Biesenbach](stu232913@mail.uni-kiel.de)
-* [Ghassan Al-Falouji](gaf@informatik.uni-kiel.de)
+MIT — see [LICENSE](LICENSE).

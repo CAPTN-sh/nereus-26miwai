@@ -1,15 +1,17 @@
-import torch.nn as nn
-
+from torch import nn
 from torch_geometric.nn import GATConv
+
 from models.nereus.params import NEREUSParams
 from models.nereus.social_modules.utils import SocialPoolFast
 
+
 class GAT(nn.Module):
+    """Graph attention network encoding social interations between the vessels.
     """
-    Graph attention network encoding social interations between the vessels.
-    """
+
     def __init__(self, config: NEREUSParams):
         super().__init__()
+        self.out_dim = config.gnn_hidden_size
         self.pre_gnn_norm = nn.LayerNorm(config.rnn_hidden_size)
         self.gnn = GATConv(
             in_channels=config.rnn_hidden_size,
@@ -28,12 +30,12 @@ class GAT(nn.Module):
         return h_gnn
 
 class SocialPooling(nn.Module):
+    """Social pooling adapted from DESIRE to encode social interations through binning.
     """
-    Social pooling adapted from DESIRE to encode social interations through binning.
-    """
+
     def __init__(self, config: NEREUSParams):
         super().__init__()
-
+        self.out_dim = config.rnn_hidden_size
         self.social_pool = SocialPoolFast(config)
         self.pre_norm = nn.LayerNorm(config.rnn_hidden_size)
 

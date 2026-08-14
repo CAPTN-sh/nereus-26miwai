@@ -1,19 +1,18 @@
-import torch
-import torch.nn as nn
+from torch import nn
 
+from data.map.rasterize import Rasterizer
 from models.desire.ioc_modules.scf import SCF
 from models.desire.params import DESIREParams
-from data.map.rasterize import Rasterizer
 
 
 class IOC(nn.Module):
+    """Inverse optimal control (IOC) module
+    - adds position dependent scene features from CNN and social pooling via SCF
+    - per-step scoring RNN over SCF features
+    - accumulated score per hypothesis
+    - single refinement Δ
     """
-    Inverse optimal control (IOC) module
-      - adds position dependent scene features from CNN and social pooling via SCF
-      - per-step scoring RNN over SCF features
-      - accumulated score per hypothesis
-      - single refinement Δ
-    """
+
     def __init__(self, params: DESIREParams, rasterizer: Rasterizer):
         super().__init__()
         _h = params.hidden_size
@@ -36,7 +35,7 @@ class IOC(nn.Module):
         h0_proj = h0.unsqueeze(2).expand(-1, -1, T, -1)
         scf_seq = self.scf.forward(h0_proj, pred_pos_abs, pred_pos_rel, data, scene_feats)
         scf_seq = scf_seq.reshape(N*K, T, -1)
-        
+
         h_seq, _ = self.gru(scf_seq, h0.reshape(N*K, H).unsqueeze(0))
         h_last = h_seq[:, -1]
 

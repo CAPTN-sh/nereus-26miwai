@@ -1,0 +1,15 @@
+source: fh       # "fh" (Kiel) | "dma" (Aarhus, Odense, Little Belt)
+device: 0
+
+regions:
+  kiel: [10.12, 54.31, 10.33, 54.46]
+  # aarhus:      [10.21, 56.04, 10.47, 56.17]  # requires source: dma
+  # odense:      [10.42, 55.42, 10.68, 55.55]  # requires source: dma
+  # little_belt: [9.64,  55.25,  9.90, 55.37]  # requires source: dma
+
+# Explicit list — evaluated in order, dataset cached across runs:
+#checkpoints:
+#  - lightning_logs/nereus_ablation/version_0/best.ckpt
+#  - lightning_logs/nereus_ablation/version_1/best.ckpt
+# Alternative: glob pattern (appended after the list above):
+checkpoint_glob: "lightning_logs/traisformer_ar/*/best.ckpt"

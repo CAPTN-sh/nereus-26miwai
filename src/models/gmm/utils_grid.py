@@ -1,20 +1,20 @@
 from pathlib import Path
+
 import numpy as np
-import torch
 import rasterio
+import torch
 from rasterio.transform import from_origin
 from rasterio.warp import transform_bounds
 from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
 
 from data.map.rasterize import Rasterizer
-from utils.config import TRAIN_BBOX, DEFAULT_CRS, AREA_CRS
+from utils.config import AREA_CRS, DEFAULT_CRS, TRAIN_BBOX
 
 GRID_RES = 10
 
 def normalize_density(grid, total_hours):
-    """
-    Normalizes the density by area and time.
+    """Normalizes the density by area and time.
     """
     area_km2 = (GRID_RES * GRID_RES) / 1e6
     grid = grid / (area_km2 * total_hours)
@@ -26,11 +26,10 @@ def normalize_density(grid, total_hours):
     return grid
 
 def cluter_to_grid(gmm, train_loader, scene, device, n_clusters):
-    """
-    Generates a density map for each cluster from historic trajectories.
+    """Generates a density map for each cluster from historic trajectories.
     """
     rasterizer = Rasterizer(TRAIN_BBOX, pos_res = GRID_RES)
-    
+
     x, y, *_ = rasterizer.get_total_grid_sizes()
     grids = np.zeros((n_clusters, y, x), dtype="float32")
 

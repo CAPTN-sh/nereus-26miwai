@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from utils.config import STEPS_PER_MINUTE
 
+
 @dataclass
 class NEREUSParams:
     # Sequence lengths
@@ -11,7 +12,7 @@ class NEREUSParams:
     static_feat_dim: int = 8
     edge_feat_dim: int = 25
 
-    mdn_modes = 3
+    mdn_modes: int = 3
 
     rnn_hidden_size: int = 256
 
@@ -23,7 +24,7 @@ class NEREUSParams:
     map_cnn_out: int = 128
     map_radius: int = 500
     map_res: int = 50
-    
+
     prior_cnn_out: int = 128
 
     prior_pred_scope: str = "path" # ["path", "destination"] (TrAISformer)

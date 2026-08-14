@@ -3,6 +3,7 @@ import torch.nn.functional as F
 
 from data.map.rasterize import Rasterizer
 
+
 def build_base_grid(rasterizer: Rasterizer, radius):
     R = int(radius / rasterizer.pos_res)
     ys = torch.linspace(-R + 0.5, R - 0.5, 2 * R)
@@ -11,8 +12,7 @@ def build_base_grid(rasterizer: Rasterizer, radius):
     return torch.stack([xx, yy], dim=-1)
 
 def sample_scene_features(scene, abs_pos, rasterizer: Rasterizer, base_grid):
-    """
-    Extracts a local region from map layers based on the current absolute position.
+    """Extracts a local region from map layers based on the current absolute position.
     """
     N, C, H, W = scene.shape
 

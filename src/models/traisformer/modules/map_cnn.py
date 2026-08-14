@@ -1,5 +1,6 @@
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
+
 
 class ScenePoolingCNN(nn.Module):
     def __init__(self, in_channels=4):

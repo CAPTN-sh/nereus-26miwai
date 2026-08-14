@@ -1,0 +1,4 @@
+decoding,ADE,minADE,FDE_1min,minFDE_1min,FDE_3min,minFDE_3min,FDE_5min,minFDE_5min
+"greedy (default, num_samples=3)",77.55,55.07,23.29,18.03,91.2,61.34,187.01,116.28
+single stochastic sample (num_samples=3),85.38,55.06,27.63,18.03,102.03,61.32,196.14,116.3
+"greedy, num_samples=16 (best-of-16)",77.55,34.73,23.29,12.42,91.2,32.87,187.0,60.24

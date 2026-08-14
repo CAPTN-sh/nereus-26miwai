@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from utils.config import STEPS_PER_MINUTE
 
+
 @dataclass
 class DESIREParams:
     # general (fix)

@@ -1,5 +1,6 @@
 import torch
 
+
 def loss_desire(output, data, config = None):
     pred_pos_rel_best, pred_pos_rel, pred_pos_rel_refined, mean, log_var, scores = output
 

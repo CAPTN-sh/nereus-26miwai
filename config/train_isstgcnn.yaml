@@ -1,0 +1,85 @@
+# IS-STGCNN (Feng et al., Ocean Engineering 266, 2022) as a comparison baseline.
+#
+# The paper is Social-STGCNN plus three components, each toggled here:
+#   adj_kernel: mahalanobis   -> IS-STGCNN-V1 (Eq. 3-5)
+#   social_sampling: true     -> IS-STGCNN-V3 (bumper-model negatives, 3.3)
+#   use_mpc: true             -> IS-STGCNN-V4 (rudder-constrained correction, 3.4)
+# Turning all three off recovers plain Social-STGCNN, the paper's own baseline.
+defaults:
+  model: IS_STGCNN
+
+  # Overrides for ISSTGCNNParams fields.
+  # STEPS_PER_MINUTE = 6  (step_size=10s -> 6 steps/min)
+  cfg:
+    pred_len: 30            # 5 min
+    obs_len: 60             # 10 min
+    max_dist: 500
+
+    n_stgcnn: 1             # paper: best with 1 ST-GCNN layer
+    n_txpcnn: 5             # paper: best with 5 TXP-CNN layers
+    stgcnn_hidden: 5
+    kernel_size: 3
+    dropout: 0.0
+    max_neighbors: 16
+
+    adj_kernel: mahalanobis  # euclid | mahalanobis | eq4_literal
+    supervise: all           # all (Social-STGCNN) | ego
+    num_samples: 3           # K for k_ade / k_fde, matches NEREUS's mdn_modes
+
+    social_sampling: true
+    negative_mode: bumper    # bumper (V3) | random (V2)
+    n_negatives: 3           # paper: 1:3 positive:negative
+    lambda_social: 0.5
+    bumper_b: 6.4
+    bumper_a: 1.6
+    collision_frac: 0.25
+    collision_weight: 1.0
+
+    use_mpc: false
+    nomoto_k: 0.1
+    nomoto_t: 30.0
+    rudder_max_deg: 35.0
+    mpc_iters: 50
+    mpc_lr: 0.1
+
+  training:
+    lr: 1.0e-4              # paper: Adam, lr 1e-4
+    weight_decay: 1.0e-5
+    batch_size: 256         # the dense [B, T, N, N] kernel is the memory driver
+    max_epochs: 30
+    device_id: 2
+    early_stopping_patience: 3
+    max_seconds: 36000
+
+  experiment: isstgcnn
+
+# Ablation reproducing the paper's Table 2. Each group has single-valued lists, so it
+# expands to exactly one run; groups are concatenated.
+combinations:
+  # Social-STGCNN (baseline row)
+  - cfg.adj_kernel: [euclid]
+    cfg.social_sampling: [false]
+    cfg.use_mpc: [false]
+  # V1: Mahalanobis distance
+  - cfg.adj_kernel: [mahalanobis]
+    cfg.social_sampling: [false]
+    cfg.use_mpc: [false]
+  # V2: random sampling
+  - cfg.adj_kernel: [euclid]
+    cfg.social_sampling: [true]
+    cfg.negative_mode: [random]
+    cfg.use_mpc: [false]
+  # V3: social sampling
+  - cfg.adj_kernel: [euclid]
+    cfg.social_sampling: [true]
+    cfg.negative_mode: [bumper]
+    cfg.use_mpc: [false]
+  # V4: MPC correction
+  - cfg.adj_kernel: [euclid]
+    cfg.social_sampling: [false]
+    cfg.use_mpc: [true]
+  # IS-STGCNN (full)
+  - cfg.adj_kernel: [mahalanobis]
+    cfg.social_sampling: [true]
+    cfg.negative_mode: [bumper]
+    cfg.use_mpc: [true]

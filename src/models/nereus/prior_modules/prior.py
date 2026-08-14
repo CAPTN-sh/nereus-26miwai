@@ -1,12 +1,14 @@
 import torch
-import torch.nn as nn
+from torch import nn
 from torch_geometric.data import Data
+
 from models.gmm.model import AIS_GMM
 
+
 class DensityMap(nn.Module):
+    """Map module that selects precomputed density map depending on ship group.
     """
-    Map module that selects precomputed density map depending on ship group.
-    """
+
     def __init__(self, density_maps):
         super().__init__()
         self.density_maps = density_maps
@@ -17,12 +19,12 @@ class DensityMap(nn.Module):
         ship_group = data.static[ego_idx, -4:]
         ship_idx = ship_group.argmax(dim=-1)
         return self.density_maps[ship_idx].unsqueeze(1), None
-    
+
 class MAP_GMM(nn.Module):
-    """
-    Map module that selects precomputed density map depending on cluster id.
+    """Map module that selects precomputed density map depending on cluster id.
     The cluster id is determined through a gmm on a pretrained trAISformer.
     """
+
     def __init__(self, gmm: AIS_GMM, cluster_maps):
         super().__init__()
         self.gmm = gmm
@@ -37,5 +39,5 @@ class MAP_GMM(nn.Module):
             cluster_prob,
             self.cluster_maps
         ).unsqueeze(1)
-        
+
         return density_map, None

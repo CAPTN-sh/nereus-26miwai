@@ -1,9 +1,10 @@
-import torch.nn as nn
-    
+from torch import nn
+
+
 class GRUEncoder(nn.Module):
+    """Single layer GRU encoder.
     """
-    Single layer GRU encoder.
-    """
+
     def __init__(self, hidden_size, input_size):
         super().__init__()
         self.hidden_size = hidden_size

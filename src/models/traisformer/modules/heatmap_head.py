@@ -1,6 +1,6 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+from torch import nn
+
 
 class LinearHead(nn.Module):
     # Approach 0
@@ -15,7 +15,7 @@ class LinearHead(nn.Module):
         B = z.shape[0]
         heatmap = self.intent_head(z)
         return heatmap.view(B, 1, self.x_size, self.y_size)
-    
+
 class LowRankHead(nn.Module):
     # Approach 3
     def __init__(self, n_embd, x_size, y_size, k_rank = 16):
@@ -49,7 +49,7 @@ class FactorizedHead(nn.Module):
         b = self.y_intent(z).view(B, self.r, 1, self.y_size)
         heatmap = torch.sum(a * b, dim=1)
         return heatmap.view(B, 1, self.x_size, self.y_size)
-    
+
 class CNNHead(nn.Module):
     # Approach 2
     def __init__(self, n_embd, x_size, y_size, k_rank = 30):
@@ -68,7 +68,7 @@ class CNNHead(nn.Module):
         x = self.proj(z).view(B, -1, self.h, self.w)
         heatmap = self.decoder(x)
         return heatmap
-    
+
 class MixtureHead(nn.Module):
     # Approach 4
     def __init__(self, n_embd, x_size, y_size, k_rank = 32):

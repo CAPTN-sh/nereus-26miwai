@@ -1,23 +1,24 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from data.map.rasterize import Rasterizer
 from models.nereus.map_modules.utils import build_base_grid, sample_scene_features
 from models.nereus.params import NEREUSParams
 
+
 class ScenePoolingCNN(nn.Module):
-    """
-    Map module that extracts a local region from environmental map layers
+    """Map module that extracts a local region from environmental map layers
     (e.g., water depth, distance to shore) based on the current absolute position
     and encodes it using a convolutional neural network.
     """
+
     def __init__(self, rasterizer:Rasterizer, config: NEREUSParams, in_channels = None, out_channels = None):
         super().__init__()
         self.rasterizer = rasterizer
         self.radius=config.map_radius
-        in_channels=in_channels if in_channels else config.map_cnn_in
-        out_channels=out_channels if out_channels else config.map_cnn_out
+        in_channels=in_channels or config.map_cnn_in
+        out_channels=out_channels or config.map_cnn_out
 
         self.pad = nn.ZeroPad2d(2)
         self.conv1 = nn.Conv2d(in_channels, 16, 5, 2)
@@ -39,11 +40,11 @@ class ScenePoolingCNN(nn.Module):
         return x.view(x.size(0), -1)
 
 class MapAttention(nn.Module):
-    """
-    Map module that extracts a local region from environmental map layers
+    """Map module that extracts a local region from environmental map layers
     (e.g., water depth, distance to shore) based on the current absolute position
     and applies attention with the prior hidden state as the query.
     """
+
     def __init__(self, rasterizer, config: NEREUSParams):
         super().__init__()
         self.rasterizer = rasterizer
@@ -68,7 +69,7 @@ class MapAttention(nn.Module):
 
     def forward(self, scene, abs_pos, query_feat):
         x = sample_scene_features(scene, abs_pos, self.rasterizer, self.base_grid)
-        
+
         feat = self.map_encoder(x)  # B,C,H,W
         B, C, H, W = feat.shape
 

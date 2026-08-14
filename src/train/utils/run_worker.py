@@ -1,8 +1,9 @@
 import logging
 import os
 from pathlib import Path
-import torch
+
 import optuna
+import torch
 
 from utils.logger import logger, trial_jsonl_callback
 
@@ -12,11 +13,9 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 def run_worker(objective, grid = None):
-    """
-    One worker process. It sees exactly ONE GPU because launcher sets CUDA_VISIBLE_DEVICES.
+    """One worker process. It sees exactly ONE GPU because launcher sets CUDA_VISIBLE_DEVICES.
     All workers share the same Optuna storage to coordinate trials.
     """
-
     torch.backends.cudnn.benchmark = True
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.set_float32_matmul_precision("high")
@@ -39,7 +38,7 @@ def run_worker(objective, grid = None):
             n_startup_trials=10,
             n_warmup_steps=8,
         )
-    else:       
+    else:
         sampler = optuna.samplers.GridSampler(grid)
         pruner = optuna.pruners.NopPruner()
 

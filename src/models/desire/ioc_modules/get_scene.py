@@ -1,11 +1,12 @@
 import torch
 import torch.nn.functional as F
 from torch import amp
+
 from data.map.rasterize import Rasterizer
 
+
 def sample_scene_features(scene_feats, pred_pos_abs, rasterizer: Rasterizer, feature_stride):
-    """
-    Samples the scene features from the cnn at a given predicted abs position.
+    """Samples the scene features from the cnn at a given predicted abs position.
     For this the position is maped onto the cnn grid.
     """
     device = scene_feats.device

@@ -1,0 +1,6 @@
+model,params_M,GFLOPs_bs32,inference_ms_bs32,inference_ms_per_sample,train_steps,train_hours,hit_10h_budget
+GRU,0.47,1.16,8.67,0.271,42199,1.27,False
+DESIRE,3.76,25.32,23.38,0.731,61799,2.8,
+TrAISformer-AR,3.64,82.41,51.26,1.602,191349,3.18,False
+NEREUS_worst,0.48,1.88,7.86,0.246,67499,1.88,False
+NEREUS_best,0.79,3.95,11.74,0.367,132249,4.2,False

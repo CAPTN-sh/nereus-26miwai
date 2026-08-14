@@ -1,15 +1,14 @@
 import torch
-import torch.nn as nn
+from torch import nn
 
+from models.desire.params import DESIREParams
 from models.desire.sgm_modules.cvae import CVAEEncoder
 from models.desire.sgm_modules.rnn import GRUDecoder
 from models.gru.modules.encoder import GRUEncoder
-from models.desire.params import DESIREParams
 
 
 class SGM(nn.Module):
-    """
-    Sample Generation Module (DESIRE) — K-sample
+    """Sample Generation Module (DESIRE) — K-sample
 
     3.1. Diverse Sample Generation with CVAE
     """
@@ -55,7 +54,7 @@ class SGM(nn.Module):
         pred_pos_rel = self.generate_traj(hidden_obs, z_all, data.static)
 
         return pred_pos_rel, hidden_obs, mean_ego, log_var_ego
-    
+
     def inference(self, data):
 
         device = data.x.device
@@ -69,7 +68,7 @@ class SGM(nn.Module):
         pred_pos_rel = self.generate_traj(hidden_obs, z_all, data.static)
 
         return pred_pos_rel, hidden_obs, None, None
-    
+
     def generate_traj(self, hidden_all, z, static):
         N, K, _ = z.shape
         H = self.hidden_size

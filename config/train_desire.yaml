@@ -1,0 +1,45 @@
+defaults:
+  model: DESIRE
+
+  # Overrides for DESIREParams fields (see src/models/desire/params.py).
+  # STEPS_PER_MINUTE = 6  (step_size=10s -> 6 steps/min)
+  cfg:
+    pred_len: 30            # 5 min  (5 * STEPS_PER_MINUTE)
+    obs_len: 60             # 10 min (10 * STEPS_PER_MINUTE)
+
+    intermediate_size: 128  # SCF / velocity feature width
+    latent_size: 16         # CVAE latent size
+    out_channels: 16        # scene-pooling CNN output channels
+    in_channels: 4          # map-context channels (matches the 4-layer scene stack)
+    hidden_size: 256
+
+    num_refine_iters: 2     # IOC refinement iterations
+    num_samples: 3          # number of hypotheses (K)
+
+    max_dist: 500           # interaction radius in metres (social pooling / edges)
+    num_rings: 6
+    num_wedges: 6
+    rmin: 5
+
+  training:
+    lr: 3.0e-4
+    weight_decay: 1.0e-5
+    batch_size: 1024
+    max_epochs: 30
+    device_id: 0
+    early_stopping_patience: 10
+    max_seconds: null       # wall-clock budget per run in seconds (null = no limit)
+
+  experiment: desire
+
+  # Post-training evaluation across regions.
+  # source: "fh" (Kiel only) | "dma" (Aarhus, Odense, Little Belt)
+  eval:
+    source: fh
+    regions:
+      kiel: [10.12, 54.31, 10.33, 54.46]
+      # aarhus:      [10.21, 56.04, 10.47, 56.17]  # requires source: dma
+      # odense:      [10.42, 55.42, 10.68, 55.55]  # requires source: dma
+      # little_belt: [9.64,  55.25,  9.90, 55.37]  # requires source: dma
+combinations:
+  - num_refine_iters: [2,2,2,]

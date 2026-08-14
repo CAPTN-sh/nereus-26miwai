@@ -1,25 +1,25 @@
 import torch
-import torch.nn as nn
+from torch import nn
+from torch_geometric.data import Data
 
+from data.map.rasterize import Rasterizer
+from models.gru.modules.decoder import MDNDecoder
+from models.gru.modules.encoder import GRUEncoder
 from models.nereus.map_modules.map import ScenePoolingCNN
 from models.nereus.params import NEREUSParams
-from models.gru.modules.encoder import GRUEncoder
-from models.gru.modules.decoder import MDNDecoder
-from torch_geometric.data import Data
-from data.map.rasterize import Rasterizer
-
 from utils.config import TRAIN_BBOX
 
+
 class NEREUS(nn.Module):
+    """NEREUS model consisting of different Modules:
+    - Encoder   (GRU)
+    - Static    (linear)
+    - Social    (GAT, SocialPooling)
+    - Map       (ScenePoolingCNN, MapAttention)
+    - Prior     (Traisformer, DensityMap, MAP_GMM)
+    - Decoder   (MDN)
     """
-    NEREUS model consisting of different Modules:
-        - Encoder   (GRU)
-        - Static    (linear)
-        - Social    (GAT, SocialPooling)
-        - Map       (ScenePoolingCNN, MapAttention)
-        - Prior     (Traisformer, DensityMap, MAP_GMM)
-        - Decoder   (MDN)
-    """
+
     def __init__(
             self,
             config: NEREUSParams,
@@ -29,6 +29,8 @@ class NEREUS(nn.Module):
             prior_module = None,
         ):
         super().__init__()
+        assert not (map_module is not None and prior_module is None), \
+            "map_module requires a prior_module to fuse its output"
         self.rasterizer = Rasterizer(TRAIN_BBOX, pos_res=config.map_res)
 
         # ENCODER
@@ -45,7 +47,7 @@ class NEREUS(nn.Module):
         # SOCIAL
         self.social_module = social_module
         if self.social_module:
-            self.gnn_proj = nn.Linear(config.gnn_hidden_size, config.rnn_hidden_size)
+            self.gnn_proj = nn.Linear(social_module.out_dim, config.rnn_hidden_size)
             module_count += 1
 
         # MAP
@@ -58,7 +60,7 @@ class NEREUS(nn.Module):
         self.prior_module = prior_module
         if self.prior_module:
             self.prior_cnn = ScenePoolingCNN(
-                self.rasterizer, 
+                self.rasterizer,
                 config=config,
                 in_channels=1,
                 out_channels=config.prior_cnn_out
@@ -117,6 +119,6 @@ class NEREUS(nn.Module):
         h = self.dropout_layer(h)
 
         return self.decoder(rel_pos_t0, h)
-    
+
     def inference(self, data: Data, maps=None):
         return self.forward(data, maps)

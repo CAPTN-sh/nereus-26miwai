@@ -1,11 +1,13 @@
 import torch
-import torch.nn as nn
+from torch import nn
+
 from models.nereus.params import NEREUSParams
 
+
 class GRUDecoder(nn.Module):
+    """Single layer GRU decoder for determenistic predictions.
     """
-    Single layer GRU decoder for determenistic predictions.
-    """
+
     def __init__(self, config: NEREUSParams):
         super().__init__()
         self.pred_len = config.pred_len
@@ -22,9 +24,9 @@ class GRUDecoder(nn.Module):
         return torch.cat(preds, dim=1)
 
 class MDNDecoder(nn.Module):
+    """Single layer GRU decoder with a MDN-head for probabilistic predictions.
     """
-    Single layer GRU decoder with a MDN-head for probabilistic predictions.
-    """
+
     def __init__(self, config: NEREUSParams):
         super().__init__()
         self.pred_len = config.pred_len

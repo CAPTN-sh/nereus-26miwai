@@ -1,6 +1,5 @@
 def mse_loss(pred_rel, data, config = None):
-    """
-    mean squared error - loss function
+    """Mean squared error - loss function
     """
     fut_rel = data.y_rel_pos
     fut_mask = data.y_mask

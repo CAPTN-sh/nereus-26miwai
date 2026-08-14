@@ -1,12 +1,13 @@
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from models.desire.params import DESIREParams
 
+
 class ScenePoolingCNN(nn.Module):
+    """Simple CNN to process the map context.
     """
-    Simple CNN to process the map context.
-    """
+
     def __init__(self, params: DESIREParams):
         super().__init__()
         _in = params.in_channels

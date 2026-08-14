@@ -1,5 +1,6 @@
 import torch
 
+
 def denormalize_static(static):
     static = static.clone()
     static[:, 0] *= 100.0
@@ -37,19 +38,19 @@ def rotate_rectangle(rect, course_deg):
 
 
 def hull_distance_vertices(hull1, hull2):
-    """
-    hull1, hull2: (..., 4, 2)
+    """hull1, hull2: (..., 4, 2)
     returns: (...)
     """
     diff = hull1.unsqueeze(-3) - hull2.unsqueeze(-4)
     return torch.norm(diff, dim=-1).amin(dim=-1).amin(dim=-1)
 
 def hull_min_distance(hull1, hull2):
-    """
-    hull1, hull2: (P,4,2)
+    """hull1, hull2: (P,4,2)
+
     Returns:
         dcpa (P,)
         Correctly returns 0 if hulls overlap.
+
     """
 
     # --------------------------------------------------
@@ -103,13 +104,13 @@ def shape_aware_cpa_and_min_dist(
     w_tcpa=600.0,
     w_dcpa=500.0,
 ):
-    """
-    Returns:
-        risk (P,)
-        dcpa_hull_at_tcpa (P,)
-        min_hull_dist_over_horizon (P,)
-    """
+    """Returns:
+    risk (P,)          combined TCPA/DCPA risk score in [0, 1]
+    tcpa (P,)          time to closest point of approach, seconds, clamped to [0, horizon]
+    dcpa_hull (P,)      hull-to-hull distance at TCPA, metres
+    min_hull_dist (P,)  true minimum hull-to-hull distance over the full predicted horizon, metres
 
+    """
     # --------------------------------------------------
     # 1) Continuous center-based TCPA
     # --------------------------------------------------
@@ -188,35 +189,35 @@ def shape_aware_cpa_and_min_dist(
         * (1 - dcpa_hull / w_dcpa).clamp(0, 1)
     )
 
-    return risk, min_hull_dist
+    return risk, tcpa, dcpa_hull, min_hull_dist
 
 
 # ============================================================
 # BATCH COLLISION AGGREGATION
 # ============================================================
 
-def compute_batch_collision_risk(data, pred_abs):
+def _build_ego_neighbor_pairs(data, pred_abs):
+    """Flatten every (ego, neighbor) pair in the batch into parallel tensors.
 
+    Returns None if no graph in the batch has any neighbor. Otherwise returns
+    (ego, other, ego_static, other_static, ego_course, other_course, graph_ids, num_graphs)
+    where graph_ids assigns each pair to its ego's position in ego_indices (0-based,
+    NOT compacted -- graphs with zero neighbors leave gaps, matching how callers already
+    de-duplicate via torch.unique(graph_ids)).
+    """
     device = pred_abs.device
     batch_ids = data.batch
     ego_indices = data.is_ego.nonzero(as_tuple=True)[0]
 
     if ego_indices.numel() == 0:
-        return 0.0, 0.0, 0.0, 0.0, 0
+        return None
 
-    pair_ego = []
-    pair_other = []
-    pair_ego_static = []
-    pair_other_static = []
-    pair_ego_course = []
-    pair_other_course = []
+    pair_ego, pair_other = [], []
+    pair_ego_static, pair_other_static = [], []
+    pair_ego_course, pair_other_course = [], []
     pair_graph_ids = []
 
-    # ---------------------------------------------------------
-    # Build ego–neighbor pairs
-    # ---------------------------------------------------------
     for g, ego_node in enumerate(ego_indices):
-
         graph_nodes = (batch_ids == batch_ids[ego_node]).nonzero(as_tuple=True)[0]
         neighbors = graph_nodes[graph_nodes != ego_node]
 
@@ -228,73 +229,96 @@ def compute_batch_collision_risk(data, pred_abs):
 
         pair_ego.append(ego_future)
         pair_other.append(other_future)
-
-        pair_ego_static.append(
-            data.static[ego_node].unsqueeze(0).expand(len(neighbors), -1)
-        )
+        pair_ego_static.append(data.static[ego_node].unsqueeze(0).expand(len(neighbors), -1))
         pair_other_static.append(data.static[neighbors])
-
-        pair_ego_course.append(
-            data.x_raw[ego_node, -1, 1].repeat(len(neighbors))
-        )
-        pair_other_course.append(
-            data.x_raw[neighbors, -1, 1]
-        )
-
-        pair_graph_ids.append(
-            torch.full((len(neighbors),), g, device=device)
-        )
+        pair_ego_course.append(data.x_raw[ego_node, -1, 1].repeat(len(neighbors)))
+        pair_other_course.append(data.x_raw[neighbors, -1, 1])
+        pair_graph_ids.append(torch.full((len(neighbors),), g, device=device))
 
     if len(pair_ego) == 0:
-        return 0.0, 0.0, 0.0, 0
+        return None
 
-    # ---------------------------------------------------------
-    # Concatenate pairs
-    # ---------------------------------------------------------
-    ego_tensor = torch.cat(pair_ego, dim=0)
-    other_tensor = torch.cat(pair_other, dim=0)
-    ego_static = torch.cat(pair_ego_static, dim=0)
-    other_static = torch.cat(pair_other_static, dim=0)
-    ego_course = torch.cat(pair_ego_course, dim=0)
-    other_course = torch.cat(pair_other_course, dim=0)
-    graph_ids = torch.cat(pair_graph_ids, dim=0)
-
-    # ---------------------------------------------------------
-    # Compute CPA-based risk + hull distances
-    # ---------------------------------------------------------
-    risk, min_hull_dist = shape_aware_cpa_and_min_dist(
-        ego_tensor,
-        other_tensor,
-        ego_static,
-        other_static,
-        ego_course,
-        other_course,
+    return (
+        torch.cat(pair_ego, dim=0),
+        torch.cat(pair_other, dim=0),
+        torch.cat(pair_ego_static, dim=0),
+        torch.cat(pair_other_static, dim=0),
+        torch.cat(pair_ego_course, dim=0),
+        torch.cat(pair_other_course, dim=0),
+        torch.cat(pair_graph_ids, dim=0),
+        len(ego_indices),
     )
 
-    # ---------------------------------------------------------
-    # Aggregate per graph
-    # ---------------------------------------------------------
-    num_graphs = len(ego_indices)
+
+def compute_batch_cpa_stats(data, pred_abs):
+    """Per-graph CPA/DCPA/TCPA/collision stats for one batch.
+
+    Unlike compute_batch_collision_risk (which only returns batch-summed scalars),
+    this returns the raw per-graph tensors -- needed both for that same mean and for
+    downstream quantiles over an evaluation run. One entry per graph that has at least
+    one neighbor (this is what "n_graphs" means throughout the eval scripts).
+
+    "dcpa"/"tcpa" describe the single most critical neighbor per graph (the one with
+    the smallest hull distance at its own closest point of approach); "min_dist" is the
+    true minimum hull distance over the whole predicted horizon, which can differ from
+    dcpa since dcpa is evaluated only at the linear-extrapolation CPA estimate.
+
+    Returns a dict of 1-D tensors: risk, min_dist, dcpa, tcpa, collision (bool).
+    """
+    device = pred_abs.device
+    pairs = _build_ego_neighbor_pairs(data, pred_abs)
+
+    if pairs is None:
+        empty = torch.empty(0, device=device)
+        return {
+            "risk": empty, "min_dist": empty, "dcpa": empty, "tcpa": empty,
+            "collision": empty.bool(),
+        }
+
+    (ego_tensor, other_tensor, ego_static, other_static,
+     ego_course, other_course, graph_ids, num_graphs) = pairs
+
+    risk, tcpa, dcpa, min_hull_dist = shape_aware_cpa_and_min_dist(
+        ego_tensor, other_tensor, ego_static, other_static, ego_course, other_course,
+    )
 
     graph_risk = torch.zeros(num_graphs, device=device)
-    graph_risk = graph_risk.scatter_reduce(
-        0, graph_ids, risk, reduce="amax"
-    )
+    graph_risk = graph_risk.scatter_reduce(0, graph_ids, risk, reduce="amax")
 
     graph_min_dist = torch.full((num_graphs,), float("inf"), device=device)
-    graph_min_dist = graph_min_dist.scatter_reduce(
-        0, graph_ids, min_hull_dist, reduce="amin"
-    )
+    graph_min_dist = graph_min_dist.scatter_reduce(0, graph_ids, min_hull_dist, reduce="amin")
+
+    # "Critical" neighbor per graph = smallest DCPA; TCPA reported is that same pair's
+    # (ties broken by smallest TCPA among tied-DCPA pairs).
+    graph_dcpa = torch.full((num_graphs,), float("inf"), device=device)
+    graph_dcpa = graph_dcpa.scatter_reduce(0, graph_ids, dcpa, reduce="amin")
+
+    is_critical_pair = dcpa <= graph_dcpa[graph_ids] + 1e-6
+    tcpa_masked = torch.where(is_critical_pair, tcpa, torch.full_like(tcpa, float("inf")))
+    graph_tcpa = torch.full((num_graphs,), float("inf"), device=device)
+    graph_tcpa = graph_tcpa.scatter_reduce(0, graph_ids, tcpa_masked, reduce="amin")
 
     valid_graphs = torch.unique(graph_ids)
 
-    graph_max_risk = graph_risk[valid_graphs]
     graph_min_dist = graph_min_dist[valid_graphs]
-    collision_count = (graph_min_dist <= 0)
+    return {
+        "risk": graph_risk[valid_graphs],
+        "min_dist": graph_min_dist,
+        "dcpa": graph_dcpa[valid_graphs],
+        "tcpa": graph_tcpa[valid_graphs],
+        "collision": graph_min_dist <= 0,
+    }
 
+
+def compute_batch_collision_risk(data, pred_abs):
+    """Back-compat wrapper over compute_batch_cpa_stats: batch-summed scalars only."""
+    stats = compute_batch_cpa_stats(data, pred_abs)
+    n = stats["risk"].numel()
+    if n == 0:
+        return 0.0, 0.0, 0.0, 0
     return (
-        graph_max_risk.sum(),
-        graph_min_dist.sum(),
-        collision_count.sum(),
-        len(valid_graphs)
+        stats["risk"].sum(),
+        stats["min_dist"].sum(),
+        stats["collision"].sum(),
+        n,
     )

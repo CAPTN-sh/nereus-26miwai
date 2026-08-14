@@ -1,14 +1,16 @@
 import torch
-from torch import nn
-from models.traisformer.model import TrAISformer
 from sklearn.mixture import GaussianMixture
+from torch import nn
+
+from models.traisformer.model_heatmap import TrAISformerHeatmap
+
 
 class AIS_GMM(nn.Module):
-    """
-    Wrapper around Sklearn GaussianMixture.
+    """Wrapper around Sklearn GaussianMixture.
     Clustering the hidden state of a TrAISfromer trained to predict the destionation.
     """
-    def __init__(self, prior_model: TrAISformer, n_clusters):
+
+    def __init__(self, prior_model: TrAISformerHeatmap, n_clusters):
         super().__init__()
         self.prior_model = prior_model
         self.prior_model.eval()

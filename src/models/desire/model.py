@@ -1,13 +1,13 @@
-import torch.nn as nn
 import torch
+from torch import nn
 
+from data.map.rasterize import Rasterizer
 from models.desire.ioc_modules.IOC import IOC
 from models.desire.ioc_modules.scene_pooling import ScenePoolingCNN
-from models.desire.sgm_modules.SGM import SGM
 from models.desire.params import DESIREParams
-from data.map.rasterize import Rasterizer
-
+from models.desire.sgm_modules.SGM import SGM
 from utils.config import TRAIN_BBOX
+
 
 class DESIRE(nn.Module):
     def __init__(self, params: DESIREParams):
@@ -20,7 +20,7 @@ class DESIRE(nn.Module):
         self.CNN = ScenePoolingCNN(params)
         self.SGM = SGM(params)
         self.IOC = IOC(params, self.rasterizer)
-        
+
 
     def forward(self, data, scene=None):
         scene_feats = self.CNN(scene).squeeze(0)
@@ -39,13 +39,13 @@ class DESIRE(nn.Module):
 
         # SGM: sample K hypotheses
         pred_pos_rel, hidde_obs_enc, _, _ = self.SGM.inference(data)
-        
+
         # IOC: scores + per-step Δ for each hypothesis
         iod_params = (pred_pos_rel, hidde_obs_enc, data, scene_feats)
         pred_pos_rel_best, pred_pos_rel_refined, scores = self.IOD_iteration(*iod_params)
 
         return pred_pos_rel_best, pred_pos_rel_refined
-    
+
     def IOD_iteration(self, pred_pos_rel, hidde_obs_enc, data, scene_feats):
 
         Y = pred_pos_rel

@@ -1,7 +1,8 @@
-import torch.nn as nn
+from torch import nn
 
 from models.desire.params import DESIREParams
-    
+
+
 class GRUDecoder(nn.Module):
     def __init__(self, params: DESIREParams):
         super().__init__()

@@ -1,17 +1,18 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch_scatter as ts
+from torch import nn
 
 from models.desire.params import DESIREParams
 
+
 class SocialPool(nn.Module):
-    """
-    Social Pooling that bins the surrounding vessels depending on distance and angle.
+    """Social Pooling that bins the surrounding vessels depending on distance and angle.
     Bins are then pooled and a Linear layer summarizes the bins for final encoding.
     """
+
     def __init__(self, params: DESIREParams):
-        super(SocialPool, self).__init__()
+        super().__init__()
         self.hidden_size = params.hidden_size
         self.num_rings = params.num_rings
         self.num_wedges = params.num_wedges
@@ -42,7 +43,7 @@ class SocialPool(nn.Module):
             # ---- positions at t0 ----
             ego_pos = pred_pos_abs[ego, :, 0]
             nbr_pos = pred_pos_abs[nbrs, :, 0]
-            nbr_hid = hidden[nbrs, :, 0] 
+            nbr_hid = hidden[nbrs, :, 0]
 
             # relative geometry per hypothesis
             diff = nbr_pos - ego_pos.unsqueeze(0)
@@ -85,8 +86,7 @@ class SocialPool(nn.Module):
         return F.relu(out)
 
     def bin_indices(self, ydash):
-        """
-        ydash: [N, T, 2]
+        """ydash: [N, T, 2]
         returns: [N, N, T] bin indices
         """
         with torch.no_grad():

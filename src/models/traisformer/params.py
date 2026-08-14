@@ -2,12 +2,13 @@ from dataclasses import dataclass
 
 from utils.config import STEPS_PER_MINUTE
 
+
 @dataclass
 class TraisformerParams:
     pred_scope: str = "path" # ["path", "destination"]
     intent_head = "factorized" # "linear", "factorized" "cnn", "mixture", "lowrank"
     k_rank = 15
-    
+
     max_dist: int = 0 # turn of edges in data loader
     pred_len: int = 0 * STEPS_PER_MINUTE
     obs_len: int =  10 * STEPS_PER_MINUTE

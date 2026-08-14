@@ -1,13 +1,14 @@
 import torch
-import torch.nn as nn
 import torch_scatter as ts
+from torch import nn
 
 from models.nereus.params import NEREUSParams
 
+
 class SocialPoolFast(nn.Module):
+    """Social pooling through bins depending on relative position and angle.
     """
-    Social pooling through bins depending on relative position and angle.
-    """
+
     def __init__(self, config: NEREUSParams):
         super().__init__()
 
@@ -38,12 +39,12 @@ class SocialPoolFast(nn.Module):
 
             nbrs = torch.tensor(nbrs, device=device)
 
-            ego_pos = y_pred[ego, 0]         # [2]
-            nbr_pos = y_pred[nbrs, 0]        # [K, 2]
-            nbr_hid = hidden[nbrs, 0]        # [K, H]
+            ego_pos = y_pred[ego, 0]  # [2]
+            nbr_pos = y_pred[nbrs, 0]  # [K, 2]
+            nbr_hid = hidden[nbrs, 0]  # [K, H]
 
             # relative positions
-            diff = nbr_pos - ego_pos         # [K, 2]
+            diff = nbr_pos - ego_pos  # [K, 2]
             r = torch.norm(diff, dim=-1)
 
             mask = r < self.rmax
@@ -57,22 +58,27 @@ class SocialPoolFast(nn.Module):
             # ---- binning ----
             r_safe = torch.clamp(r, min=self.rmin, max=self.rmax - 1e-6)
             r_normed = torch.log(r_safe / self.rmin) / torch.log(self.rmax / self.rmin)
-            ring = torch.floor(self.num_rings * r_normed).long().clamp(0, self.num_rings - 1)
+            ring = (
+                torch
+                .floor(self.num_rings * r_normed)
+                .long()
+                .clamp(0, self.num_rings - 1)
+            )
 
             theta = torch.atan2(diff[:, 1], diff[:, 0])
             theta_normed = torch.remainder(theta, self.two_pi) / self.two_pi
-            wedge = torch.floor(self.num_wedges * theta_normed).long().clamp(0, self.num_wedges - 1)
-
-            bin_id = ring * self.num_wedges + wedge   # [K]
-
-            pooled = ts.scatter_mean(
-                nbr_hid,
-                bin_id,
-                dim=0,
-                dim_size=num_bins
+            wedge = (
+                torch
+                .floor(self.num_wedges * theta_normed)
+                .long()
+                .clamp(0, self.num_wedges - 1)
             )
 
-            pooled = pooled.mean(dim=0)   # mean over bins → [H]
+            bin_id = ring * self.num_wedges + wedge  # [K]
+
+            pooled = ts.scatter_mean(nbr_hid, bin_id, dim=0, dim_size=num_bins)
+
+            pooled = pooled.mean(dim=0)  # mean over bins → [H]
             out[ego, 0] = pooled
 
         return out

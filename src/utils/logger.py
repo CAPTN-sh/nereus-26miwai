@@ -1,14 +1,16 @@
+import fcntl
+import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
-import json
-import os
-import optuna
-import fcntl
+from typing import Callable
 
-def logger(file_prefix: str = "run", log_dir: str = ".logs", level=logging.INFO):
-    """
-    Configure logging to output both to console and to a timestamped log file.
+import optuna
+
+
+def logger(file_prefix: str = "run", log_dir: str = ".logs", level=logging.INFO) -> None:
+    """Configure logging to output both to console and to a timestamped log file.
     Can be called once from the main entrypoint.
     """
     if logging.getLogger().handlers:
@@ -27,9 +29,8 @@ def logger(file_prefix: str = "run", log_dir: str = ".logs", level=logging.INFO)
     logging.info("Logger initialized. Writing logs to %s", logfile)
 
 
-def _append_jsonl_atomic(jsonl_path: Path, record: dict):
-    """
-    Append one JSON object per line to jsonl_path.
+def _append_jsonl_atomic(jsonl_path: Path, record: dict) -> None:
+    """Append one JSON object per line to jsonl_path.
     Uses an advisory file lock (fcntl) so multiple GPU workers can write safely.
     """
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
@@ -44,13 +45,17 @@ def _append_jsonl_atomic(jsonl_path: Path, record: dict):
         finally:
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
-def trial_jsonl_callback(jsonl_path: Path):
-    """
-    Optuna callback factory: called after each trial finishes (success/pruned/fail).
+
+def trial_jsonl_callback(jsonl_path: Path) -> Callable[..., None]:
+    """Optuna callback factory: called after each trial finishes (success/pruned/fail).
     Appends a JSON record to a shared JSONL.
     """
-    def _cb(study: optuna.Study, trial: optuna.trial.FrozenTrial):
-        formatted_params = {k: round(v, 7) if isinstance(v, float) else v for k, v in trial.params.items()}
+
+    def _cb(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
+        formatted_params = {
+            k: round(v, 7) if isinstance(v, float) else v
+            for k, v in trial.params.items()
+        }
         record = {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "trial_number": trial.number,
