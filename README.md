@@ -95,6 +95,18 @@ ADE / minADE and FDE / minFDE (m) at 1/3/5 minutes, Kiel Fjord test set, all shi
 | NEREUS_worst | 61.45 | 46.88 | 13.67 | 10.76 | 74.22 | 54.08 | 154.56 | 109.16 |
 | **NEREUS_best** | **46.85** | 35.26 | **11.15** | **8.26** | **56.03** | 39.84 | **118.58** | 82.35 |
 
+### Qualitative behaviour under dense traffic
+
+![NEREUS predictions during dense public-holiday sailing traffic](results/busy_trajectory_examples.png)
+
+These examples come from the busiest hour of 18 May 2023, a public holiday with
+many sailing vessels following irregular, wind-driven paths. They illustrate a
+current limitation of NEREUS: such motion departs from the approximately
+constant-heading behaviour represented by most predicted modes, making these
+trajectories difficult to forecast. The examples are qualitative and should not
+be interpreted as collision-safety validation; geographic and temporal
+out-of-distribution transfer also remains unevaluated.
+
 The full 30-configuration module-ablation comparison is in `results/summary.md`, along
 with per-run TCPA/DCPA/collision-risk statistics.
 
