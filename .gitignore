@@ -230,3 +230,8 @@ lightning_logs/**/events.out.tfevents.*
 screenlog*
 optuna_nereus.db
 lightning_logs/nereus_ablation_continued/*
+
+# Local editor and machine-specific files
+.history/
+local/
+github_todo.md
