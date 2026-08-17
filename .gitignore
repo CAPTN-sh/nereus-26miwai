@@ -224,7 +224,7 @@ __marimo__/
 checkpoints/
 *.pt
 *.pth
-*.ckpt
+#*.ckpt
 *.tif
 lightning_logs/**/events.out.tfevents.*
 screenlog*
